@@ -28,14 +28,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
 
+      # Cache npm dependencies manually and safely (won't fail if package-lock.json is missing)
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json found. Running npm ci..."
+            npm ci
+          else
+            echo "package-lock.json not found. Running npm install..."
+            npm install
+          fi
 
       - name: Build Vite Application
         env:
