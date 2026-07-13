@@ -1,5 +1,5 @@
 import React from "react";
-import { MapPin, Calendar, Clock, Compass, Heart, Sparkles, Tent, Award } from "lucide-react";
+import { MapPin, Calendar, Clock, Compass, Heart, Sparkles, Tent, Award, Map } from "lucide-react";
 
 interface InputFormProps {
   destination: string;
@@ -14,8 +14,13 @@ interface InputFormProps {
   setPolicy: (val: string) => void;
   travelType: string;
   setTravelType: (val: string) => void;
+  transportMode: string;
+  setTransportMode: (val: string) => void;
   onSubmit: () => void;
   loading: boolean;
+  onSuggestSpots: () => void;
+  spotsLoading: boolean;
+  hasSuggestedSpots: boolean;
 }
 
 export const InputForm: React.FC<InputFormProps> = ({
@@ -31,8 +36,13 @@ export const InputForm: React.FC<InputFormProps> = ({
   setPolicy,
   travelType,
   setTravelType,
+  transportMode,
+  setTransportMode,
   onSubmit,
   loading,
+  onSuggestSpots,
+  spotsLoading,
+  hasSuggestedSpots,
 }) => {
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,9 +110,47 @@ export const InputForm: React.FC<InputFormProps> = ({
             value={departureTime}
             onChange={(e) => setDepartureTime(e.target.value)}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-200 text-sm"
-            disabled={loading}
+            disabled={loading || spotsLoading}
             required
           />
+        </div>
+      </div>
+
+      {/* 移動手段の選択 */}
+      <div className="space-y-2">
+        <label className="flex items-center text-sm font-semibold text-slate-700">
+          <Compass className="w-4 h-4 mr-2 text-indigo-600" />
+          移動手段
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            key="transit-car"
+            type="button"
+            onClick={() => setTransportMode("car")}
+            className={`py-3 px-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition-all duration-200 cursor-pointer ${
+              transportMode === "car"
+                ? "border-indigo-600 bg-indigo-50/60 text-indigo-800 font-bold shadow-xs"
+                : "border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-50"
+            }`}
+            disabled={loading || spotsLoading}
+          >
+            <span className="text-base">🚗 自家用車・レンタカー</span>
+            <span className="text-[9px] font-normal text-slate-500">駐車場やドライブ重視</span>
+          </button>
+          <button
+            key="transit-public"
+            type="button"
+            onClick={() => setTransportMode("public")}
+            className={`py-3 px-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition-all duration-200 cursor-pointer ${
+              transportMode === "public"
+                ? "border-indigo-600 bg-indigo-50/60 text-indigo-800 font-bold shadow-xs"
+                : "border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-50"
+            }`}
+            disabled={loading || spotsLoading}
+          >
+            <span className="text-base">🚃 公共交通機関</span>
+            <span className="text-[9px] font-normal text-slate-500">駅近・バスルートを考慮</span>
+          </button>
         </div>
       </div>
 
@@ -123,12 +171,12 @@ export const InputForm: React.FC<InputFormProps> = ({
               key={item.id}
               type="button"
               onClick={() => setStyle(item.id)}
-              className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all duration-200 ${
+              className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all duration-200 cursor-pointer ${
                 style === item.id
                   ? "border-indigo-600 bg-indigo-50/60 text-indigo-800 font-bold shadow-xs"
                   : "border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-50"
               }`}
-              disabled={loading}
+              disabled={loading || spotsLoading}
             >
               {item.label}
             </button>
@@ -153,12 +201,12 @@ export const InputForm: React.FC<InputFormProps> = ({
               key={item.id}
               type="button"
               onClick={() => setTravelType(item.id)}
-              className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all duration-200 ${
+              className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all duration-200 cursor-pointer ${
                 travelType === item.id
                   ? "border-indigo-600 bg-indigo-50/60 text-indigo-800 font-bold shadow-xs"
                   : "border-slate-200 bg-slate-50/50 text-slate-600 hover:bg-slate-50"
               }`}
-              disabled={loading}
+              disabled={loading || spotsLoading}
             >
               {item.label}
             </button>
@@ -208,48 +256,78 @@ export const InputForm: React.FC<InputFormProps> = ({
         </div>
       </div>
 
-      {/* 送信ボタン */}
-      <button
-        type="submit"
-        disabled={loading || !destination}
-        className={`w-full py-3.5 px-4 rounded-xl font-bold text-white shadow-md flex items-center justify-center transition-all duration-300 ${
-          loading || !destination
-            ? "bg-slate-300 cursor-not-allowed shadow-none"
-            : "bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] hover:shadow-indigo-100"
-        }`}
-        id="generate-plan-button"
-      >
-        {loading ? (
-          <>
-            <svg
-              className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            AIが最高の旅程をプランニング中...
-          </>
-        ) : (
-          <>
-            <Sparkles className="w-5 h-5 mr-2" />
-            AI自動生成スタート
-          </>
-        )}
-      </button>
+      {/* 2ステップ・コントロール */}
+      <div className="space-y-3 pt-3 border-t border-slate-100">
+        {/* ボタン1: おすすめスポット提案 */}
+        <button
+          type="button"
+          onClick={onSuggestSpots}
+          disabled={loading || spotsLoading || !destination}
+          className={`w-full py-3 px-4 rounded-xl font-bold text-sm shadow-xs flex items-center justify-center transition-all duration-200 cursor-pointer ${
+            spotsLoading
+              ? "bg-indigo-100 border border-indigo-200 text-indigo-500 cursor-wait"
+              : loading || !destination
+              ? "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed"
+              : "bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-50 active:scale-[0.99]"
+          }`}
+        >
+          {spotsLoading ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2.5 h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              立ち寄りスポットを検索中...
+            </>
+          ) : (
+            <>
+              <Map className="w-4 h-4 mr-2 text-indigo-500" />
+              1. 立ち寄り候補地をマップに並べる
+            </>
+          )}
+        </button>
+
+        {/* ボタン2: 行程表の作成 */}
+        <button
+          type="submit"
+          disabled={loading || spotsLoading || !destination}
+          className={`w-full py-3.5 px-4 rounded-xl font-bold text-white shadow-md flex flex-col items-center justify-center transition-all duration-300 cursor-pointer ${
+            loading || spotsLoading || !destination
+              ? "bg-slate-300 cursor-not-allowed shadow-none"
+              : hasSuggestedSpots
+              ? "bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] hover:shadow-indigo-100 animate-pulse-subtle"
+              : "bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] hover:shadow-indigo-100"
+          }`}
+          id="generate-plan-button"
+        >
+          {loading ? (
+            <div className="flex items-center">
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>AIが最高のしおりを作成中...</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center text-sm font-bold">
+                <Sparkles className="w-4.5 h-4.5 mr-2 text-yellow-300" />
+                2. 行程表（しおり）を作成する
+              </div>
+              {hasSuggestedSpots ? (
+                <span className="text-[10px] font-medium text-indigo-100 mt-0.5">
+                  ★ 選択したスポットを考慮してルートを最適化！
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium text-indigo-100 mt-0.5">
+                  スポットの指定なしで直接自動生成することも可能です
+                </span>
+              )}
+            </>
+          )}
+        </button>
+      </div>
+
     </form>
   );
 };

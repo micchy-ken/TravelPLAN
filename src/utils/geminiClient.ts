@@ -1,4 +1,4 @@
-import { TravelPlan } from "../types";
+import { TravelPlan, Spot } from "../types";
 
 export interface GeneratePlanParams {
   destination: string;
@@ -7,15 +7,106 @@ export interface GeneratePlanParams {
   style: string;
   policy: string;
   travelType: string;
+  transportMode: string;
+  selectedSpots: Spot[];
+}
+
+export interface SuggestSpotsParams {
+  destination: string;
+  travelType: string;
+  transportMode: string;
+  style: string;
+  policy: string;
+}
+
+export async function suggestSpotsClient(
+  params: SuggestSpotsParams,
+  apiKey: string
+): Promise<Spot[]> {
+  const { destination, travelType, transportMode, style, policy } = params;
+  const transitText = transportMode === "car" ? "自家用車・レンタカー（道路アクセスや駐車場が便利、ドライブ向き）" : "公共交通機関（電車・バス、駅から徒歩圏内、またはバス便が良い）";
+
+  const prompt = `目的地「${destination}」において、以下の条件に最適な立ち寄りスポット・おすすめスポット（観光地、飲食店、温泉、買い出し場所など）を5箇所から8箇所、提案してください。
+旅行の種類: ${travelType}
+移動手段: ${transitText}
+旅行スタイル: ${style}
+しおり方針: ${policy}
+
+### 条件：
+1. 各スポットには10から90の範囲の相対的な二次元座標 (x, y) を割り当ててください。これらは、簡易マップ上にスポットをプロットするために使用されます（例えば、駅や主要ICをx=50, y=15近辺に置き、そこからの位置関係に沿ってx, yを割り当てると良いマップになります）。
+2. 移動手段が「自家用車」の場合は、駐車場がある、またはドライブで立ち寄りやすい場所を重視してください。
+3. 移動手段が「公共交通機関」の場合は、駅から近い、あるいはバスで行きやすいなど、アクセスしやすいスポットを提案してください。
+4. キャンプ（travelType="キャンプ"）の場合は、買い出しスポット、清潔なトイレ・水洗トイレが整った場所、および魅力的な温泉・入浴施設を必ず複数含めてください。
+5. 各スポットについて、なぜこの移動手段（自家用車または公共交通機関）にとって最適なのか、その理由 (reason) を詳しく記述してください。`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      systemInstruction: {
+        parts: [
+          {
+            text: "あなたは地元の観光情報に非常に精通した優秀なトラベルコンシェルジュです。ユーザーの移動手段（車 vs 公共交通機関）や目的に対して、本当に快適で満足度の高い立ち寄りスポットを、正確な相対座標付きで提案してください。出力は指定されたJSONスキーマに完全に準拠し、余計な説明文は一切省いてください。",
+          },
+        ],
+      },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            spots: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  id: { type: "STRING", description: "ユニークな識別子（例: spot-1, spot-2）" },
+                  name: { type: "STRING", description: "スポットの正式名称または具体的な場所名" },
+                  description: { type: "STRING", description: "スポットの魅力、見どころ、何ができるかの説明（100文字程度）" },
+                  category: { type: "STRING", description: "カテゴリー: '観光', '食事', '宿泊', '温泉', '買い出し', 'その他' のいずれか" },
+                  recommendedDuration: { type: "STRING", description: "推奨滞在時間（例: 「60分」、「120分」）" },
+                  estimatedCost: { type: "INTEGER", description: "一人あたりの目安費用（日本円。無料や不明の場合は0）" },
+                  x: { type: "INTEGER", description: "マップ描画用のX座標 (10-90の範囲で、スポットの位置関係を表現)" },
+                  y: { type: "INTEGER", description: "マップ描画用のY座標 (10-90の範囲で、スポットの位置関係を表現)" },
+                  reason: { type: "STRING", description: "この移動手段（車または公共交通機関）で訪れるのにおすすめな具体的な理由やアクセスのヒント" }
+                },
+                required: ["id", "name", "description", "category", "recommendedDuration", "estimatedCost", "x", "y", "reason"]
+              }
+            }
+          },
+          required: ["spots"]
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini APIエラー: ${errText}`);
+  }
+
+  const result = await response.json();
+  const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error("AIからおすすめスポットの応答を取得できませんでした。");
+  }
+
+  const parsed = JSON.parse(text);
+  return parsed.spots as Spot[];
 }
 
 export async function generatePlanClient(
   params: GeneratePlanParams,
   apiKey: string
 ): Promise<TravelPlan> {
-  const { destination, days, departureTime, style, policy, travelType } = params;
+  const { destination, days, departureTime, style, policy, travelType, transportMode, selectedSpots } = params;
 
-  const prompt = `以下の要件に基づいて、最高に魅力的な「旅のしおり」を1つの完璧なJSONオブジェクトとして生成してください。必ず指定されたJSONスキーマに従ってください。
+  let prompt = `以下の要件に基づいて、最高に魅力的な「旅のしおり」を1つの完璧なJSONオブジェクトとして生成してください。必ず指定されたJSONスキーマに従ってください。
 
 ### 条件：
 目的地: ${destination}
@@ -24,9 +115,18 @@ export async function generatePlanClient(
 旅行スタイル: ${style}
 しおり方針・こだわり: ${policy}
 旅行の種類: ${travelType}
+移動手段: ${transportMode === "car" ? "自家用車・レンタカー（道路状況・駐車場を考慮）" : "公共交通機関（電車・バスの時刻や徒歩ルートを考慮）"}
+`;
 
-### 指示：
-- 旅行の全日程における、時間ごとの具体的なスケジュール（何時にどこに行って何をするか、移動時間など）を含めてください。
+  if (selectedSpots && selectedSpots.length > 0) {
+    prompt += `\n### 必ず行程に組み込む立ち寄りスポット（最優先）：\n`;
+    selectedSpots.forEach((spot) => {
+      prompt += `- ${spot.name} (カテゴリー: ${spot.category}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
+    });
+    prompt += `\n上記スポットを、無駄な行き来が発生しない最もスムーズな順番（移動ルート）で行程に必ず含め、適切な移動時間を見積もってタイムスケジュールを組み立ててください。移動方法は「${transportMode === "car" ? "車移動" : "公共交通機関や徒歩"}」の所要時間・特徴を反映させてください。\n`;
+  }
+
+  prompt += `\n- 旅行の全日程における、時間ごとの具体的なスケジュール（何時にどこに行って何をするか、移動時間など）を含めてください。
 - キャンプ（travelType="キャンプ"）が選ばれた場合は、周辺の魅力的な温泉施設や食材の買い出しスポット、快適なトイレ（ウォシュレット付きなど清潔な設備）が利用できる場所を優先的に、行程に組み込むか、おすすめメモとして必ず盛り込んでください。
 - 行程に含まれる各場所の「場所名、移動所要時間、目安費用（円）、カテゴリー（移動/観光/食事/宿泊/温泉/買い出し）、説明・メモ、および将来Notionデータベースへインポートするためのプロパティ構成」を含めてください。
 - Notionに流し込む際のプロパティは、日本の旅行者がNotionで管理しやすいよう「Name (タイトル/行動内容)」「Day (日付/何日目)」「Time (時間帯)」「Category (カテゴリー)」「Location (場所/住所)」「Memo (メモ)」「Cost (費用)」を想定した値をJSON内に含めてください。`;
@@ -51,7 +151,7 @@ export async function generatePlanClient(
       systemInstruction: {
         parts: [
           {
-            text: "あなたはプロの旅行アドバイザーであり、Notionをフル活用するデジタルしおりクリエイターです。ユーザーがワクワクし、かつ実用的な、手抜きのないタイムスケジュールを作成してください。出力は必ず指定されたJSON形式にのみ従い、余計な説明テキストやMarkdownの装飾を一切含めないでください。",
+            text: "あなたはプロの旅行アドバイザーであり、Notionをフル活用するデジタルしおりクリエイターです。ユーザーがワクワクし、かつ実用的な、手抜きのないタイムスケジュールを作成してください。出力は必ず指定されたJSON形式にのみ従い、余計な説明テキストやMarkdown of 装飾を一切含めないでください。",
           },
         ],
       },

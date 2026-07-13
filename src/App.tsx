@@ -7,8 +7,9 @@ import {
 import { InputForm } from "./components/InputForm";
 import { TimelineView } from "./components/TimelineView";
 import { NotionIntegration } from "./components/NotionIntegration";
-import { TravelPlan } from "./types";
-import { generatePlanClient } from "./utils/geminiClient";
+import { TravelPlan, Spot } from "./types";
+import { generatePlanClient, suggestSpotsClient } from "./utils/geminiClient";
+import { InteractiveMap } from "./components/InteractiveMap";
 
 export default function App() {
   // Input states
@@ -18,6 +19,12 @@ export default function App() {
   const [style, setStyle] = useState("カップル");
   const [policy, setPolicy] = useState("ゆっくり温泉・癒やし");
   const [travelType, setTravelType] = useState("観光");
+
+  // Transportation and spot customization states
+  const [transportMode, setTransportMode] = useState("car");
+  const [spots, setSpots] = useState<Spot[]>([]);
+  const [selectedSpotIds, setSelectedSpotIds] = useState<string[]>([]);
+  const [spotsLoading, setSpotsLoading] = useState(false);
 
   // Output/Status states
   const [loading, setLoading] = useState(false);
@@ -44,6 +51,109 @@ export default function App() {
     setTravelType(item.travelType);
     setPolicy(item.policy);
     setStyle(item.style);
+    // When changing destination, clear previously loaded spots for fresh search
+    setSpots([]);
+    setSelectedSpotIds([]);
+  };
+
+  const handleSuggestSpots = async () => {
+    if (!destination) {
+      setError("目的地を入力してください。");
+      return;
+    }
+    setSpotsLoading(true);
+    setError(null);
+    try {
+      const isGitHubPages = window.location.hostname.endsWith("github.io");
+      let success = false;
+      let generatedSpots: Spot[] = [];
+
+      // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
+      if (!isGitHubPages) {
+        try {
+          const response = await fetch("/api/spots", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              destination,
+              travelType,
+              transportMode,
+              style,
+              policy,
+            }),
+          });
+
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("text/html")) {
+            throw new Error("HTML response received (404 page).");
+          }
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            generatedSpots = data.spots;
+            success = true;
+          } else {
+            throw new Error(data.error || "おすすめスポットの検索中に予期しないエラーが発生しました。");
+          }
+        } catch (serverErr) {
+          console.warn("Backend spots API request failed. Falling back to client-side direct generation...", serverErr);
+        }
+      }
+
+      // 2. Fall back to direct browser generation if server fails or on static pages
+      if (!success) {
+        let activeKey = apiKey.trim();
+        
+        // Fall back to Vite-injected build-time key from GitHub Secrets
+        const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+        if (!activeKey && viteKey && viteKey !== "MY_GEMINI_API_KEY" && viteKey.trim() !== "") {
+          activeKey = viteKey.trim();
+        }
+
+        if (!activeKey) {
+          setShowApiSettings(true); // Open settings panel automatically so user can paste a key
+          throw new Error(
+            "GitHub Pagesなどの静的環境では、おすすめスポット取得にGemini APIキーの直接指定が必要です。左下の「APIキー設定」からご自身のGemini APIキーを入力して保存してください（キーはブラウザに安全に保存されます）。"
+          );
+        }
+
+        generatedSpots = await suggestSpotsClient(
+          {
+            destination,
+            travelType,
+            transportMode,
+            style,
+            policy,
+          },
+          activeKey
+        );
+      }
+
+      if (generatedSpots && generatedSpots.length > 0) {
+        setSpots(generatedSpots);
+        // Pre-select all suggested spots by default for complete planning comfort
+        setSelectedSpotIds(generatedSpots.map((s) => s.id));
+      } else {
+        throw new Error("おすすめスポットの提案結果が空でした。");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "立ち寄りスポットの検索に失敗しました。時間をおいてもう一度お試しください。");
+    } finally {
+      setSpotsLoading(false);
+    }
+  };
+
+  const handleToggleSpot = (id: string) => {
+    setSelectedSpotIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
   };
 
   const handleGeneratePlan = async () => {
@@ -53,6 +163,7 @@ export default function App() {
       const isGitHubPages = window.location.hostname.endsWith("github.io");
       let success = false;
       let generatedPlan: TravelPlan | null = null;
+      const selectedSpots = spots.filter((spot) => selectedSpotIds.includes(spot.id));
 
       // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
       if (!isGitHubPages) {
@@ -69,6 +180,8 @@ export default function App() {
               style,
               policy,
               travelType,
+              transportMode,
+              selectedSpots,
             }),
           });
 
@@ -114,6 +227,8 @@ export default function App() {
             style,
             policy,
             travelType,
+            transportMode,
+            selectedSpots,
           },
           activeKey
         );
@@ -132,6 +247,7 @@ export default function App() {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-20 selection:bg-indigo-100 selection:text-indigo-900">
@@ -192,8 +308,13 @@ export default function App() {
               setPolicy={setPolicy}
               travelType={travelType}
               setTravelType={setTravelType}
+              transportMode={transportMode}
+              setTransportMode={setTransportMode}
               onSubmit={handleGeneratePlan}
               loading={loading}
+              onSuggestSpots={handleSuggestSpots}
+              spotsLoading={spotsLoading}
+              hasSuggestedSpots={spots.length > 0}
             />
 
             {/* API Key Settings (For Static Pages Fallback / GitHub Pages) */}
@@ -287,8 +408,42 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* プラン未生成の初期ウェルカム表示 */}
-            {!plan && !loading && (
+            {/* 1. おすすめスポット＆簡易エリアマップ */}
+            {(spots.length > 0 || spotsLoading) && (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-4"
+              >
+                {spotsLoading ? (
+                  <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center space-y-6 shadow-xs">
+                    <div className="relative w-16 h-16 mx-auto">
+                      <div className="absolute inset-0 rounded-full border-4 border-indigo-100" />
+                      <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+                    </div>
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-bold text-slate-900 animate-pulse">
+                        おすすめの立ち寄り候補地をマッピング中...
+                      </h4>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed font-semibold">
+                        目的地周辺から、ご指定のこだわりや移動手段（{transportMode === "car" ? "マイカー" : "公共交通機関"}）にぴったりな場所を探し出しています。
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <InteractiveMap
+                    spots={spots}
+                    selectedSpotIds={selectedSpotIds}
+                    onToggleSpot={handleToggleSpot}
+                    transportMode={transportMode}
+                    destination={destination}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* 2. プラン未生成かつ候補地もない初期ウェルカム表示 */}
+            {!plan && !loading && spots.length === 0 && !spotsLoading && (
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -300,8 +455,8 @@ export default function App() {
                   </div>
                   <h3 className="text-base font-bold text-slate-900">しおり作成をはじめましょう！</h3>
                   <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                    左側のフォームにあなたの理想の旅行を入力し、「AI自動生成スタート」ボタンを押してください。<br />
-                    キャンプ、温泉旅、食べ歩きなど、あなたのスタイルに最適なオリジナルのタイムスケジュールを瞬時に設計します。
+                    左側のフォームにあなたの理想の旅行を入力し、まずは<br />
+                    <strong className="text-indigo-600 font-extrabold">「1. 立ち寄り候補地をマップに並べる」</strong> ボタンを押してください。AIがおすすめの立ち寄り地をご提案します！
                   </p>
                 </div>
 
@@ -323,6 +478,28 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* 3. おすすめスポット選択完了後、しおり自動生成を促す案内 */}
+            {!plan && !loading && spots.length > 0 && !spotsLoading && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-gradient-to-r from-indigo-50 to-slate-50 border border-indigo-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm"
+              >
+                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0">
+                  ✨
+                </div>
+                <div className="flex-1">
+                  <h5 className="text-xs font-extrabold text-slate-850">
+                    次のステップ：しおり（行程スケジュール）の作成へ進みましょう
+                  </h5>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed font-semibold">
+                    マップ上のピンまたはリストから立ち寄りたい場所のチェックが終わったら、左側にある<br />
+                    <strong className="text-indigo-600 font-extrabold">「2. 旅程表を自動生成する」</strong> ボタンを押してください。時間配分を考慮した旅程スケジュールをAIが完成させます。
+                  </p>
                 </div>
               </motion.div>
             )}

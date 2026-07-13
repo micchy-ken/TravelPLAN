@@ -32,3 +32,15 @@ export interface TravelPlan {
   overview: string;
   days: TravelDay[];
 }
+
+export interface Spot {
+  id: string;
+  name: string;
+  description: string;
+  category: "移動" | "観光" | "食事" | "宿泊" | "温泉" | "買い出し" | "その他" | string;
+  recommendedDuration: string;
+  estimatedCost: number;
+  x: number; // 10-90 (X coordinate for custom map)
+  y: number; // 10-90 (Y coordinate for custom map)
+  reason: string; // Why recommended for this transportation mode
+}
