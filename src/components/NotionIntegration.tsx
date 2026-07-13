@@ -116,6 +116,11 @@ export const NotionIntegration: React.FC<NotionIntegrationProps> = ({ plan }) =>
         })
       });
 
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error("GitHub Pages (静的サーバー) ではバックエンド機能を使用できません。");
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -138,10 +143,14 @@ export const NotionIntegration: React.FC<NotionIntegrationProps> = ({ plan }) =>
       }
     } catch (err: any) {
       console.error(err);
+      const isStatic = window.location.hostname.endsWith("github.io") || err.message?.includes("GitHub Pages");
+      
       setExportLogs(prev => [...prev, `接続エラー: ${err.message || err}`]);
       setExportResult({
         success: false,
-        message: "サーバーとの通信に失敗しました。Notionの認証キーやネットワークを確認してください。"
+        message: isStatic 
+          ? "GitHub Pagesなどの静的環境（サーバーレス環境）では、CORS制限とバックエンドサーバーが存在しないため、Notion APIへの直接の書き込み機能は動作しません。代わりに、以下にある「コピー可能なMarkdown」や「JSONデータ」をコピーして、Notionに直接ペーストしてお使いください！"
+          : "サーバーとの通信に失敗しました。Notionの認証キーやネットワークを確認してください。"
       });
     } finally {
       setExporting(false);

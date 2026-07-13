@@ -2,12 +2,13 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Sparkles, Compass, Database, Globe, Map, TreePine, 
-  Flame, Heart, Calendar, Clock, RefreshCw, AlertCircle
+  Flame, Heart, Calendar, Clock, RefreshCw, AlertCircle, Key
 } from "lucide-react";
 import { InputForm } from "./components/InputForm";
 import { TimelineView } from "./components/TimelineView";
 import { NotionIntegration } from "./components/NotionIntegration";
 import { TravelPlan } from "./types";
+import { generatePlanClient } from "./utils/geminiClient";
 
 export default function App() {
   // Input states
@@ -23,6 +24,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<TravelPlan | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "notion">("timeline");
+
+  // Client-side API settings (for GitHub Pages fallback)
+  const [apiKey, setApiKey] = useState(() => {
+    return localStorage.getItem("user_gemini_api_key") || "";
+  });
+  const [showApiSettings, setShowApiSettings] = useState(false);
 
   // Quick select items for excellent UX
   const quickSearches = [
@@ -43,28 +50,81 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/plan", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          destination,
-          days,
-          departureTime,
-          style,
-          policy,
-          travelType,
-        }),
-      });
+      const isGitHubPages = window.location.hostname.endsWith("github.io");
+      let success = false;
+      let generatedPlan: TravelPlan | null = null;
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "しおりの生成中に予期しないエラーが発生しました。");
+      // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
+      if (!isGitHubPages) {
+        try {
+          const response = await fetch("/api/plan", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              destination,
+              days,
+              departureTime,
+              style,
+              policy,
+              travelType,
+            }),
+          });
+
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("text/html")) {
+            throw new Error("HTML response received (404 page).");
+          }
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            generatedPlan = data.plan;
+            success = true;
+          } else {
+            throw new Error(data.error || "しおりの生成中に予期しないエラーが発生しました。");
+          }
+        } catch (serverErr) {
+          console.warn("Backend API request failed. Falling back to browser direct generation...", serverErr);
+        }
       }
 
-      setPlan(data.plan);
-      setActiveTab("timeline"); // Automatically show timeline
+      // 2. Fall back to direct browser generation if server fails or on static pages
+      if (!success) {
+        let activeKey = apiKey.trim();
+        
+        // Fall back to Vite-injected build-time key from GitHub Secrets
+        const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+        if (!activeKey && viteKey && viteKey !== "MY_GEMINI_API_KEY" && viteKey.trim() !== "") {
+          activeKey = viteKey.trim();
+        }
+
+        if (!activeKey) {
+          setShowApiSettings(true); // Open settings panel automatically so user can paste a key
+          throw new Error(
+            "GitHub Pagesなどの静的環境では、AIプラン生成にGemini APIキーの直接指定が必要です。左下の「APIキー設定」からご自身のGemini APIキーを入力して保存してください（キーはブラウザに安全に保存され、直接Google APIのみと通信します）。"
+          );
+        }
+
+        generatedPlan = await generatePlanClient(
+          {
+            destination,
+            days,
+            departureTime,
+            style,
+            policy,
+            travelType,
+          },
+          activeKey
+        );
+      }
+
+      if (generatedPlan) {
+        setPlan(generatedPlan);
+        setActiveTab("timeline"); // Automatically show timeline
+      } else {
+        throw new Error("プランの生成結果が空でした。");
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "サーバーとの通信に失敗しました。時間をおいてもう一度お試しください。");
@@ -135,6 +195,78 @@ export default function App() {
               onSubmit={handleGeneratePlan}
               loading={loading}
             />
+
+            {/* API Key Settings (For Static Pages Fallback / GitHub Pages) */}
+            <div className="mt-6 pt-5 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowApiSettings(!showApiSettings)}
+                className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 hover:text-indigo-600 transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5" />
+                  GitHub Pages 動作設定 (Gemini API)
+                </span>
+                <span>{showApiSettings ? "▲ 閉じる" : "▼ 開く"}</span>
+              </button>
+
+              <AnimatePresence>
+                {showApiSettings && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden mt-3"
+                  >
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                        GitHub Pagesなどの静的環境でAI生成を動かすための設定です。
+                        GitHub Secretsに <code>GEMINI_API_KEY</code> を追加してビルドした場合は自動で適用されますが、それ以外の場合はここでご自身のAPIキーを一時的に登録して保存できます（キーはブラウザに安全に保存されます）。
+                      </p>
+                      
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                          Gemini API キー
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            value={apiKey}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setApiKey(val);
+                              localStorage.setItem("user_gemini_api_key", val);
+                            }}
+                            placeholder="AIzaSy... で始まるキーを入力"
+                            className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          {apiKey && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setApiKey("");
+                                localStorage.removeItem("user_gemini_api_key");
+                              }}
+                              className="px-2.5 py-1.5 text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-100 transition-all cursor-pointer"
+                            >
+                              消去
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {((import.meta as any).env?.VITE_GEMINI_API_KEY) && ((import.meta as any).env?.VITE_GEMINI_API_KEY) !== "MY_GEMINI_API_KEY" && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2 rounded-lg">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          環境変数からビルド済みのAPIキーが検出されました
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* 右カラム：プランプレビュー & Notion (幅7/12) */}
