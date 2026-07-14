@@ -554,6 +554,63 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* APIキー設定 */}
+            <div className="mt-6 pt-5 border-t border-slate-100 space-y-3">
+              <button
+                type="button"
+                onClick={() => setShowApiSettings(!showApiSettings)}
+                className="w-full flex items-center justify-between text-slate-700 hover:text-slate-900 font-bold text-xs bg-slate-50 hover:bg-slate-100 px-3 py-2.5 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-indigo-500 animate-pulse" />
+                  <span>Gemini APIキー設定 (静的環境用)</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  {showApiSettings ? "閉じる ▲" : "開く ▼"}
+                </span>
+              </button>
+
+              {showApiSettings && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 shadow-inner">
+                  <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
+                    GitHub Pages などの静的環境で、サーバー側 API を介さずに直接ブラウザから Gemini API を呼び出す場合に入力してください。キーはブラウザに安全に保存されます。
+                  </p>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => {
+                        const newKey = e.target.value;
+                        setApiKey(newKey);
+                        localStorage.setItem("user_gemini_api_key", newKey);
+                      }}
+                      placeholder="AI Studio から取得した API キーを入力"
+                      className="w-full px-3 py-2 pl-9 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <Key className="absolute left-3 top-2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
+                  {apiKey && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-emerald-600 font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        キー設定済み (ローカル保存中)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApiKey("");
+                          localStorage.removeItem("user_gemini_api_key");
+                        }}
+                        className="text-[9px] text-red-500 hover:text-red-700 font-bold hover:underline cursor-pointer"
+                      >
+                        クリアする
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 右カラム：プランプレビュー & Notion (幅7/12) */}
