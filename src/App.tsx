@@ -53,6 +53,21 @@ export default function App() {
   });
   const [showApiSettings, setShowApiSettings] = useState(false);
 
+  // Travel plan change tracking states
+  const [initialPlanSignature, setInitialPlanSignature] = useState<string>("");
+
+  const getPlanSequenceSignature = (p: TravelPlan | null): string => {
+    if (!p) return "";
+    return p.days
+      .map(
+        (day) =>
+          `${day.dayNumber}:${day.items.map((item) => `${item.activity}`).join(",")}`
+      )
+      .join("|");
+  };
+
+  const isPlanChanged = plan ? getPlanSequenceSignature(plan) !== initialPlanSignature : false;
+
   // Quick select items for excellent UX
   const quickSearches = [
     { destination: "伊豆高原", days: "1泊2日", travelType: "温泉宿", policy: "ゆっくり温泉・癒やし", style: "カップル", title: "♨️ 伊豆・温泉のんびり旅" },
@@ -255,6 +270,7 @@ export default function App() {
 
       if (generatedPlan) {
         setPlan(generatedPlan);
+        setInitialPlanSignature(getPlanSequenceSignature(generatedPlan));
         setActiveTab("timeline"); // Automatically show timeline
 
         // 履歴を保存する
@@ -313,6 +329,7 @@ export default function App() {
     setSpots(item.spots || []);
     setSelectedSpotIds(item.selectedSpotIds || []);
     setPlan(item.plan);
+    setInitialPlanSignature(getPlanSequenceSignature(item.plan));
     setError(null);
     localStorage.setItem("start_location", item.startLocation || "東京駅");
   };
@@ -846,6 +863,7 @@ export default function App() {
                           onUpdatePlan={(updatedPlan) => setPlan(updatedPlan)}
                           onRecalculatePlan={handleRecalculatePlan}
                           recalculating={recalculating}
+                          isPlanChanged={isPlanChanged}
                         />
                       </motion.div>
                     ) : (

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { 
   Train, Compass, Utensils, Home, ShoppingBag, Clock, 
   MapPin, AlertCircle, Sparkles, CheckCircle2, ChevronRight, HelpCircle,
-  ArrowUp, ArrowDown, Trash2, RefreshCw
+  ArrowUp, ArrowDown, Trash2, RefreshCw, GripVertical
 } from "lucide-react";
 import { TravelPlan, TimelineItem, Spot } from "../types";
 import { LeafletMap } from "./LeafletMap";
@@ -12,17 +12,21 @@ interface TimelineViewProps {
   onUpdatePlan: (updatedPlan: TravelPlan) => void;
   onRecalculatePlan: (customSpots: Spot[]) => void;
   recalculating?: boolean;
+  isPlanChanged: boolean;
 }
 
 export const TimelineView: React.FC<TimelineViewProps> = ({ 
   plan, 
   onUpdatePlan, 
   onRecalculatePlan, 
-  recalculating = false 
+  recalculating = false,
+  isPlanChanged
 }) => {
   const [activeDay, setActiveDay] = useState<number>(1);
   const [completedItems, setCompletedItems] = useState<string[]>([]);
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Category Icon helper
   const getCategoryIcon = (category: string) => {
@@ -71,6 +75,50 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     } else {
       setCompletedItems([...completedItems, activityId]);
     }
+  };
+
+  // Drag and Drop handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData("text/plain", index.toString());
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDragEnter = (e: React.DragEvent, targetIndex: number) => {
+    if (draggingIndex === null) return;
+    setDragOverIndex(targetIndex);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggingIndex === null || draggingIndex === targetIndex) {
+      setDraggingIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const dayIndex = plan.days.findIndex(d => d.dayNumber === activeDay);
+    if (dayIndex === -1) return;
+
+    const newPlan = JSON.parse(JSON.stringify(plan)) as TravelPlan;
+    const items = newPlan.days[dayIndex].items;
+
+    // Reorder items
+    const [draggedItem] = items.splice(draggingIndex, 1);
+    items.splice(targetIndex, 0, draggedItem);
+
+    onUpdatePlan(newPlan);
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingIndex(null);
+    setDragOverIndex(null);
   };
 
   const currentDayPlan = plan.days.find((d) => d.dayNumber === activeDay) || plan.days[0];
@@ -244,9 +292,13 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
         <button
           type="button"
-          disabled={recalculating || currentDayPlan.items.length === 0}
+          disabled={recalculating || !isPlanChanged || currentDayPlan.items.length === 0}
           onClick={handleTriggerRecalculate}
-          className="self-start md:self-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-xs rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+          className={`self-start md:self-center px-4 py-2 font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+            recalculating || !isPlanChanged || currentDayPlan.items.length === 0
+              ? "bg-slate-200 text-slate-400 shadow-none cursor-not-allowed border border-slate-200"
+              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+          }`}
         >
           {recalculating ? (
             <>
@@ -268,6 +320,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           const itemId = `${activeDay}-${index}-${item.activity}`;
           const isCompleted = completedItems.includes(itemId);
           const mapId = `${item.time}-${item.activity}`;
+          const isDraggingCurrent = draggingIndex === index;
+          const isDragTarget = dragOverIndex === index && draggingIndex !== index;
 
           return (
             <div 
@@ -275,11 +329,19 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               className="relative group animate-fade-in"
               onMouseEnter={() => setHoveredItemId(mapId)}
               onMouseLeave={() => setHoveredItemId(null)}
+              draggable
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDragEnter={(e) => handleDragEnter(e, index)}
+              onDrop={(e) => handleDrop(e, index)}
+              onDragEnd={handleDragEnd}
             >
               {/* タイムラインの丸・アイコン */}
               <div 
                 className={`absolute -left-[45px] top-1.5 w-10 h-10 rounded-full flex items-center justify-center border-2 bg-white shadow-xs transition-all duration-200 ${
-                  isCompleted 
+                  isDraggingCurrent
+                    ? "border-slate-200 opacity-45"
+                    : isCompleted 
                     ? "border-indigo-500 bg-indigo-50" 
                     : "border-slate-200 group-hover:border-slate-400"
                 }`}
@@ -294,19 +356,31 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               {/* タイムライン項目カード */}
               <div 
                 className={`bg-white rounded-xl border p-4 transition-all duration-200 ${
-                  isCompleted 
+                  isDraggingCurrent
+                    ? "border-dashed border-indigo-300 opacity-40 scale-[0.98] shadow-inner bg-slate-50"
+                    : isDragTarget
+                    ? "border-indigo-500 bg-indigo-50/40 scale-[1.01] shadow-md ring-2 ring-indigo-200"
+                    : isCompleted 
                     ? "border-indigo-100 bg-indigo-50/10 opacity-75" 
                     : "border-slate-200/80 hover:border-indigo-200/60 shadow-xs hover:shadow-sm"
                 }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-2 mb-2.5">
+                <div className="flex flex-wrap items-start justify-between gap-2 mb-2.5" onDragStart={(e) => e.stopPropagation()}>
                   <div className="flex items-center space-x-2">
+                    {/* ドラッグハンドル */}
+                    <div 
+                      className="p-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500 rounded transition-colors"
+                      title="ドラッグして並び替え"
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </div>
                     {/* チェックボックス */}
                     <input 
                       type="checkbox" 
                       id={`check-${itemId}`}
                       checked={isCompleted}
                       onChange={() => toggleItemComplete(itemId)}
+                      onDragStart={(e) => e.stopPropagation()}
                       className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                     {/* 時間 */}
@@ -318,7 +392,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1.5" onDragStart={(e) => e.stopPropagation()}>
                     {/* 行程並び替え・削除ボタン群 */}
                     <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 mr-1 opacity-60 group-hover:opacity-100 transition-all duration-150">
                       <button
@@ -329,6 +403,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         }}
                         disabled={index === 0}
                         title="上へ移動"
+                        onDragStart={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-white rounded text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
@@ -341,6 +416,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         }}
                         disabled={index === currentDayPlan.items.length - 1}
                         title="下へ移動"
+                        onDragStart={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-white rounded text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
@@ -352,6 +428,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                           deleteItem(index);
                         }}
                         title="削除"
+                        onDragStart={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded cursor-pointer transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -371,7 +448,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2" onDragStart={(e) => e.stopPropagation()}>
                   <label 
                     htmlFor={`check-${itemId}`}
                     className={`block font-black text-slate-800 text-base cursor-pointer ${
