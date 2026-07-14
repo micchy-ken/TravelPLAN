@@ -19,6 +19,8 @@ export interface TimelineItem {
   notionProperties: NotionProperties;
   x?: number;
   y?: number;
+  lat?: number;
+  lng?: number;
 }
 
 export interface TravelDay {
@@ -45,4 +47,6 @@ export interface Spot {
   x: number; // 10-90 (X coordinate for custom map)
   y: number; // 10-90 (Y coordinate for custom map)
   reason: string; // Why recommended for this transportation mode
+  lat?: number;
+  lng?: number;
 }

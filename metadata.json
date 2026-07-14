@@ -1,6 +1,6 @@
 {
   "name": "旅のしおりプランナー",
   "description": "旅行スタイルや方針、日程から、AIが最適なタイムスケジュール付きの旅のしおりを提案・自動作成してくれるアプリ。将来的なNotionデータベースへの連携（流し込み）用のデータ設計・出力にも対応しています。",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

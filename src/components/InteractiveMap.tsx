@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Spot } from "../types";
 import { MapPin, Info, Car, Train, Clock, CircleDollarSign, Check, Plus, Minus, Layers } from "lucide-react";
+import { LeafletMap } from "./LeafletMap";
 
 interface InteractiveMapProps {
   spots: Spot[];
@@ -82,138 +83,25 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                 <Layers className="w-3.5 h-3.5 text-slate-400" />
-                簡易エリアマップ (相対座標表示)
+                エリアマップ (Leaflet.js)
               </span>
               <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
-                インタラクティブ
+                実世界地図
               </span>
             </div>
 
-            {/* カスタムマップキャンバス */}
-            <div className="relative aspect-square w-full rounded-2xl bg-gradient-to-br from-slate-900 to-indigo-950 border border-slate-800 shadow-inner overflow-hidden flex-1 min-h-[280px]">
-              {/* マップ用グリッド線（SF/テック/モダン風） */}
-              <div className="absolute inset-0 grid grid-cols-6 grid-rows-6 pointer-events-none opacity-[0.04]">
-                {Array.from({ length: 36 }).map((_, i) => (
-                  <div key={i} className="border border-white"></div>
-                ))}
-              </div>
-              
-              {/* 背景の等高線・円形パルス（演出） */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4/5 h-4/5 rounded-full border border-white/[0.02] pointer-events-none animate-pulse-slow"></div>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2/5 h-2/5 rounded-full border border-white/[0.03] pointer-events-none"></div>
-
-              {/* 移動手段インジケーター */}
-              <div className="absolute bottom-3 left-3 flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/80 backdrop-blur-xs border border-white/[0.1] rounded-lg text-[9px] text-slate-300 font-bold font-mono">
-                {transportMode === "car" ? (
-                  <>
-                    <Car className="w-3.5 h-3.5 text-amber-400 animate-bounce" />
-                    DRIVE ROUTE ACTIVE
-                  </>
-                ) : (
-                  <>
-                    <Train className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                    TRANSIT ROUTE ACTIVE
-                  </>
-                )}
-              </div>
-
-              {/* 主要拠点インジケーター（x=50, y=15近辺に玄関口となる駅・ICを自動でプロット） */}
-              <div className="absolute top-[15%] left-[50%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none z-10">
-                <div className="w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-ping absolute"></div>
-                <div className="w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-white relative"></div>
-                <span className="text-[8px] text-white/70 font-bold bg-slate-950/90 px-1.5 py-0.5 rounded-md mt-1 scale-75 border border-white/10 whitespace-nowrap">
-                  📍 エリア入口 (駅/IC)
-                </span>
-              </div>
-
-              {/* 選択されたスポット同士をつなぐ経路線（SVG） */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
-                {selectedSpotsInOrder.length > 1 && (
-                  <g>
-                    {/* ライン（点線） */}
-                    <path
-                      d={selectedSpotsInOrder
-                        .map((spot, index) => `${index === 0 ? "M" : "L"} ${spot.x}% ${spot.y}%`)
-                        .join(" ")}
-                      fill="none"
-                      stroke="url(#route-grad)"
-                      strokeWidth="2.5"
-                      strokeDasharray="6,4"
-                      className="animate-dash"
-                    />
-                    
-                    {/* ルートのグラデーション定義 */}
-                    <defs>
-                      <linearGradient id="route-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#818cf8" />
-                        <stop offset="100%" stopColor="#312e81" />
-                      </linearGradient>
-                    </defs>
-                  </g>
-                )}
-              </svg>
-
-              {/* スポットピンのレンダリング */}
-              {filteredSpots.map((spot, index) => {
-                const isSelected = selectedSpotIds.includes(spot.id);
-                const isHovered = hoveredSpotId === spot.id;
-                const spotIndex = selectedSpotsInOrder.findIndex((s) => s.id === spot.id);
-
-                return (
-                  <div
-                    key={spot.id}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer group"
-                    style={{ left: `${spot.x}%`, top: `${spot.y}%`, zIndex: isHovered ? 40 : 20 }}
-                    onMouseEnter={() => setHoveredSpotId(spot.id)}
-                    onMouseLeave={() => setHoveredSpotId(null)}
-                    onClick={() => onToggleSpot(spot.id)}
-                  >
-                    {/* ピンの外輪パルス */}
-                    {isSelected && (
-                      <span className="absolute -inset-2.5 bg-indigo-500/20 rounded-full animate-ping pointer-events-none"></span>
-                    )}
-
-                    {/* メインピンノード */}
-                    <motion.div
-                      whileHover={{ scale: 1.15 }}
-                      className={`w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 transition-all ${
-                        isSelected
-                          ? "bg-indigo-600 border-white text-white"
-                          : "bg-slate-800 border-slate-600 text-slate-300 group-hover:border-slate-400"
-                      }`}
-                    >
-                      {isSelected ? (
-                        <span className="text-[10px] font-black">{spotIndex !== -1 ? spotIndex + 1 : "✓"}</span>
-                      ) : (
-                        <span className="text-[9px] font-bold">{index + 1}</span>
-                      )}
-                    </motion.div>
-
-                    {/* スポット名ホバーラベル */}
-                    <div
-                      className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-950/95 backdrop-blur-md border border-white/10 rounded-lg shadow-xl text-[10px] font-bold text-white whitespace-nowrap transition-all duration-150 ${
-                        isHovered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 pointer-events-none"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="px-1 py-0.2 bg-indigo-500/30 text-indigo-300 rounded text-[8px]">
-                          {spot.category}
-                        </span>
-                        {spot.name}
-                      </div>
-                      <div className="text-[8px] text-slate-400 font-normal mt-0.5 max-w-[150px] truncate">
-                        {spot.description}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <LeafletMap 
+              spots={filteredSpots}
+              selectedSpotIds={selectedSpotIds}
+              activeId={hoveredSpotId}
+              onToggleSpot={onToggleSpot}
+              height="350px"
+            />
 
             {/* 下部ヘルプ */}
             <p className="text-[10px] text-slate-400 leading-relaxed font-semibold">
-              💡 <strong>簡易マップの見方：</strong>
-              ピンをクリックして選択すると、しおりにその場所が組み込まれます。選択順に経路（ルート点線）が描画され、最適な移動行程がAIに伝わります。
+              💡 <strong>マップの使い方：</strong><br />
+              地図上のピンをクリックするか、右側のスポットカードの追加・削除ボタンを押すことで、しおりにその場所が組み込まれます。選択順に経路が自動で接続されます。
             </p>
           </div>
 

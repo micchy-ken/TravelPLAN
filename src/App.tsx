@@ -14,7 +14,9 @@ import { InteractiveMap } from "./components/InteractiveMap";
 export default function App() {
   // Input states
   const [destination, setDestination] = useState("");
-  const [startLocation, setStartLocation] = useState("東京駅");
+  const [startLocation, setStartLocation] = useState(() => {
+    return localStorage.getItem("start_location") || "東京駅";
+  });
   const [days, setDays] = useState("1泊2日");
   const [departureTime, setDepartureTime] = useState("08:00");
   const [style, setStyle] = useState("カップル");
@@ -29,9 +31,21 @@ export default function App() {
 
   // Output/Status states
   const [loading, setLoading] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<TravelPlan | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "notion">("timeline");
+
+  // Location and Travel History states
+  const [locLoading, setLocLoading] = useState(false);
+  const [history, setHistory] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("travel_history") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
 
   // Client-side API settings (for GitHub Pages fallback)
   const [apiKey, setApiKey] = useState(() => {
@@ -159,14 +173,14 @@ export default function App() {
     });
   };
 
-  const handleGeneratePlan = async () => {
+  const handleGeneratePlan = async (customSpotsOverride?: Spot[]) => {
     setLoading(true);
     setError(null);
     try {
       const isGitHubPages = window.location.hostname.endsWith("github.io");
       let success = false;
       let generatedPlan: TravelPlan | null = null;
-      const selectedSpots = spots.filter((spot) => selectedSpotIds.includes(spot.id));
+      const selectedSpots = customSpotsOverride || spots.filter((spot) => selectedSpotIds.includes(spot.id));
 
       // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
       if (!isGitHubPages) {
@@ -242,6 +256,29 @@ export default function App() {
       if (generatedPlan) {
         setPlan(generatedPlan);
         setActiveTab("timeline"); // Automatically show timeline
+
+        // 履歴を保存する
+        const newHistoryItem = {
+          id: Date.now().toString(),
+          title: generatedPlan.title || `${destination}のしおり`,
+          destination,
+          days,
+          startLocation,
+          style,
+          policy,
+          travelType,
+          transportMode,
+          plan: generatedPlan,
+          spots,
+          selectedSpotIds,
+          timestamp: Date.now(),
+        };
+        setHistory((prev) => {
+          const filtered = prev.filter((h) => h.destination !== destination || h.days !== days);
+          const updated = [newHistoryItem, ...filtered].slice(0, 10);
+          localStorage.setItem("travel_history", JSON.stringify(updated));
+          return updated;
+        });
       } else {
         throw new Error("プランの生成結果が空でした。");
       }
@@ -251,6 +288,56 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRecalculatePlan = async (customSpots: Spot[]) => {
+    setRecalculating(true);
+    try {
+      await handleGeneratePlan(customSpots);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "再計算に失敗しました。");
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
+  const handleLoadHistoryItem = (item: any) => {
+    setDestination(item.destination);
+    setDays(item.days);
+    setStartLocation(item.startLocation || "東京駅");
+    setStyle(item.style);
+    setPolicy(item.policy);
+    setTravelType(item.travelType);
+    setTransportMode(item.transportMode);
+    setSpots(item.spots || []);
+    setSelectedSpotIds(item.selectedSpotIds || []);
+    setPlan(item.plan);
+    setError(null);
+    localStorage.setItem("start_location", item.startLocation || "東京駅");
+  };
+
+  const handleGetCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setError("お使いのブラウザは現在地情報の取得に対応していません。");
+      return;
+    }
+    setLocLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const locationStr = `現在地 (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+        setStartLocation(locationStr);
+        localStorage.setItem("start_location", locationStr);
+        setLocLoading(false);
+      },
+      (err) => {
+        console.error("Geolocation error:", err);
+        setError("現在地の取得に失敗しました。GPSなどの位置情報の権限がブラウザで許可されているかご確認ください。");
+        setLocLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   };
 
 
@@ -336,14 +423,136 @@ export default function App() {
                   <input
                     type="text"
                     value={startLocation}
-                    onChange={(e) => setStartLocation(e.target.value)}
+                    onChange={(e) => {
+                      setStartLocation(e.target.value);
+                      localStorage.setItem("start_location", e.target.value);
+                    }}
                     placeholder="例: 東京駅、自宅、新宿駅"
-                    className="w-full px-3 py-2.5 pl-9 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 pl-9 pr-28 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                   <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-indigo-500 pointer-events-none" />
+                  
+                  <button
+                    type="button"
+                    disabled={locLoading}
+                    onClick={handleGetCurrentLocation}
+                    className="absolute right-1.5 top-1.5 bottom-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-100 text-indigo-700 disabled:text-slate-400 font-bold text-[10px] rounded border border-indigo-200/50 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    {locLoading ? (
+                      <>
+                        <svg className="animate-spin h-3 w-3 text-indigo-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        取得中...
+                      </>
+                    ) : (
+                      <>
+                        <Compass className="w-3.5 h-3.5" />
+                        現在地を取得
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
+            </div>
+
+            {/* 作成履歴 */}
+            <div className="mt-6 pt-5 border-t border-slate-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
+                  <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">📋</span>
+                  <span>作成履歴 ({history.length}件)</span>
+                </div>
+                {history.length > 0 && (
+                  <div className="relative">
+                    {showConfirmClear ? (
+                      <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 px-2 py-0.5 rounded text-[10px]">
+                        <span className="text-red-700 font-bold">全削除？</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHistory([]);
+                            localStorage.removeItem("travel_history");
+                            setShowConfirmClear(false);
+                          }}
+                          className="text-red-600 hover:text-red-800 font-black cursor-pointer"
+                        >
+                          はい
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmClear(false)}
+                          className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer"
+                        >
+                          いいえ
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmClear(true)}
+                        className="text-[10px] text-red-500 hover:text-red-700 font-bold flex items-center gap-1 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                      >
+                        履歴削除
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {history.length === 0 ? (
+                <div className="text-center py-4 px-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 text-[11px] text-slate-400 font-semibold">
+                  まだ作成されたしおりはありません。
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
+                  {history.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group flex items-start gap-2 p-2.5 bg-slate-50 hover:bg-indigo-50/30 border border-slate-200 hover:border-indigo-200 rounded-xl transition-all duration-200 text-left cursor-pointer relative"
+                      onClick={() => handleLoadHistoryItem(item)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-slate-800 text-[11px] truncate flex items-center gap-1">
+                          <span>📍 {item.destination}</span>
+                          <span className="font-normal text-[10px] text-slate-400 bg-slate-100 px-1 py-0.2 rounded-md">
+                            {item.days}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate font-semibold mt-0.5">
+                          {item.title}
+                        </div>
+                        <div className="text-[9px] text-slate-400 mt-1">
+                          {new Date(item.timestamp).toLocaleString("ja-JP", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const updated = history.filter((h) => h.id !== item.id);
+                          setHistory(updated);
+                          localStorage.setItem("travel_history", JSON.stringify(updated));
+                        }}
+                        className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded opacity-0 group-hover:opacity-100 transition-all duration-150 self-center cursor-pointer"
+                        title="この履歴を削除"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -388,13 +597,48 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <InteractiveMap
-                    spots={spots}
-                    selectedSpotIds={selectedSpotIds}
-                    onToggleSpot={handleToggleSpot}
-                    transportMode={transportMode}
-                    destination={destination}
-                  />
+                  <div className="space-y-4">
+                    <InteractiveMap
+                      spots={spots}
+                      selectedSpotIds={selectedSpotIds}
+                      onToggleSpot={handleToggleSpot}
+                      transportMode={transportMode}
+                      destination={destination}
+                    />
+
+                    {/* しおり作成ボタンを候補地表示のすぐ下にも追加 */}
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleGeneratePlan()}
+                        disabled={loading || spotsLoading || !destination}
+                        className={`w-full py-4 px-6 rounded-2xl font-black text-white shadow-lg hover:shadow-indigo-100 flex items-center justify-center gap-2.5 transition-all duration-300 cursor-pointer text-sm ${
+                          loading || spotsLoading || !destination
+                            ? "bg-slate-300 cursor-not-allowed shadow-none"
+                            : "bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 active:scale-[0.98]"
+                        }`}
+                        id="recommended-spots-generate-button"
+                      >
+                        {loading ? (
+                          <div className="flex items-center gap-2">
+                            <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>AIが最高のしおりを作成中...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <Sparkles className="w-5 h-5 text-yellow-300" />
+                            <span>選択した候補地でしおり（行程スケジュール）を作成する</span>
+                            <span className="text-[11px] font-bold bg-white/20 px-2.5 py-0.5 rounded-full">
+                              選択中: {selectedSpotIds.length}件
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </motion.div>
             )}
@@ -540,7 +784,12 @@ export default function App() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                       >
-                        <TimelineView plan={plan} />
+                        <TimelineView 
+                          plan={plan} 
+                          onUpdatePlan={(updatedPlan) => setPlan(updatedPlan)}
+                          onRecalculatePlan={handleRecalculatePlan}
+                          recalculating={recalculating}
+                        />
                       </motion.div>
                     ) : (
                       <motion.div

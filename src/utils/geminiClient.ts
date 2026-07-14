@@ -39,7 +39,8 @@ export async function suggestSpotsClient(
 2. 移動手段が「自家用車」の場合は、駐車場がある、またはドライブで立ち寄りやすい場所を重視してください。
 3. 移動手段が「公共交通機関」の場合は、駅から近い、あるいはバスで行きやすいなど、アクセスしやすいスポットを提案してください。
 4. キャンプ（travelType="キャンプ"）の場合は、買い出しスポット、清潔なトイレ・水洗トイレが整った場所、および魅力的な温泉・入浴施設を必ず複数含めてください。
-5. 各スポットについて、なぜこの移動手段（自家用車または公共交通機関）にとって最適なのか、その理由 (reason) を詳しく記述してください。`;
+5. 各スポットについて、なぜこの移動手段（自家用車または公共交通機関）にとって最適なのか、その理由 (reason) を詳しく記述してください。
+6. 各スポットの実世界の正確な緯度(lat)と経度(lng)を推測し、それぞれ小数型（Number）で設定してください。`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
 
@@ -75,9 +76,11 @@ export async function suggestSpotsClient(
                   estimatedCost: { type: "INTEGER", description: "一人あたりの目安費用（日本円。無料や不明の場合は0）" },
                   x: { type: "INTEGER", description: "マップ描画用のX座標 (10-90の範囲で、スポットの位置関係を表現)" },
                   y: { type: "INTEGER", description: "マップ描画用のY座標 (10-90の範囲で、スポットの位置関係を表現)" },
+                  lat: { type: "NUMBER", description: "実世界の緯度（例: 35.6812）" },
+                  lng: { type: "NUMBER", description: "実世界の経度（例: 139.7671）" },
                   reason: { type: "STRING", description: "この移動手段（車または公共交通機関）で訪れるのにおすすめな具体的な理由やアクセスのヒント" }
                 },
-                required: ["id", "name", "description", "category", "recommendedDuration", "estimatedCost", "x", "y", "reason"]
+                required: ["id", "name", "description", "category", "recommendedDuration", "estimatedCost", "x", "y", "lat", "lng", "reason"]
               }
             }
           },
@@ -139,6 +142,7 @@ export async function generatePlanClient(
 - 各スケジュール項目には必ず、簡易マップ描画用の相対二次元座標 (x, y) を割り当ててください（10から90の範囲）。
   - 起点である出発地「${startLocation}」は、x=50, y=15近辺（またはスポットに近い位置）に配置してください。
   - 行程中の各スポットの位置関係、移動の順番に合わせて、x, y座標を整合性のある形で割り当ててください（例えば、1番目の立ち寄り地、2番目の立ち寄り地、3番目の立ち寄り地、宿泊地、と順番に移動経路が繋がるように設定してください）。
+- 各スケジュール項目（立ち寄りスポット、駅、ホテルなど、移動項目は除くか移動先/現在の座標）の実世界における正確な緯度と経度（lat, lng）を推定して、それぞれ数値（例: latは35.6812、lngは139.7671）で設定してください。
 - 旅行の全日程における、時間ごとの具体的なスケジュール（何時にどこに行って何をするか、移動時間など）を含めてください。
 - キャンプ（travelType="キャンプ"）が選ばれた場合は、周辺的魅力のある温泉施設や食材の買い出しスポット、快適なトイレ（ウォシュレット付きなど清潔な設備）が利用できる場所を優先的に、行程に組み込むか、おすすめメモとして必ず盛り込んでください。
 - 行程に含まれる各場所の「場所名、移動所要時間、目安費用（円）、カテゴリー（移動/観光/食事/宿泊/温泉/買い出し）、説明・メモ、および将来Notionデータベースへインポートするためのプロパティ構成」を含めてください。
@@ -243,6 +247,14 @@ export async function generatePlanClient(
                           type: "INTEGER",
                           description: "マップ描画用の相対Y座標（10-90）"
                         },
+                        lat: {
+                          type: "NUMBER",
+                          description: "実世界の緯度（例: 35.6812）"
+                        },
+                        lng: {
+                          type: "NUMBER",
+                          description: "実世界の経度（例: 139.7671）"
+                        },
                         notionProperties: {
                           type: "OBJECT",
                           properties: {
@@ -257,7 +269,7 @@ export async function generatePlanClient(
                           required: ["Name", "Day", "Time", "Category", "Location", "Memo", "Cost"]
                         }
                       },
-                      required: ["time", "activity", "category", "location", "duration", "cost", "memo", "x", "y", "notionProperties"]
+                      required: ["time", "activity", "category", "location", "duration", "cost", "memo", "x", "y", "lat", "lng", "notionProperties"]
                     }
                   }
                 },
