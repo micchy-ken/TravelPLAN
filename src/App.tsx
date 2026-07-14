@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Sparkles, Compass, Database, Globe, Map, TreePine, 
-  Flame, Heart, Calendar, Clock, RefreshCw, AlertCircle, Key
+  Flame, Heart, Calendar, Clock, RefreshCw, AlertCircle, Key, MapPin
 } from "lucide-react";
 import { InputForm } from "./components/InputForm";
 import { TimelineView } from "./components/TimelineView";
@@ -14,6 +14,7 @@ import { InteractiveMap } from "./components/InteractiveMap";
 export default function App() {
   // Input states
   const [destination, setDestination] = useState("");
+  const [startLocation, setStartLocation] = useState("東京駅");
   const [days, setDays] = useState("1泊2日");
   const [departureTime, setDepartureTime] = useState("08:00");
   const [style, setStyle] = useState("カップル");
@@ -82,6 +83,7 @@ export default function App() {
               transportMode,
               style,
               policy,
+              startLocation,
             }),
           });
 
@@ -126,6 +128,7 @@ export default function App() {
             transportMode,
             style,
             policy,
+            startLocation,
           },
           activeKey
         );
@@ -182,6 +185,7 @@ export default function App() {
               travelType,
               transportMode,
               selectedSpots,
+              startLocation,
             }),
           });
 
@@ -229,6 +233,7 @@ export default function App() {
             travelType,
             transportMode,
             selectedSpots,
+            startLocation,
           },
           activeKey
         );
@@ -317,76 +322,28 @@ export default function App() {
               hasSuggestedSpots={spots.length > 0}
             />
 
-            {/* API Key Settings (For Static Pages Fallback / GitHub Pages) */}
+            {/* スタート地点・出発地設定（元APIキー入力箇所をフルアップグレード） */}
             <div className="mt-6 pt-5 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowApiSettings(!showApiSettings)}
-                className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 hover:text-indigo-600 transition-all cursor-pointer"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Key className="w-3.5 h-3.5" />
-                  GitHub Pages 動作設定 (Gemini API)
-                </span>
-                <span>{showApiSettings ? "▲ 閉じる" : "▼ 開く"}</span>
-              </button>
-
-              <AnimatePresence>
-                {showApiSettings && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden mt-3"
-                  >
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                      <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
-                        GitHub Pagesなどの静的環境でAI生成を動かすための設定です。
-                        GitHub Secretsに <code>GEMINI_API_KEY</code> を追加してビルドした場合は自動で適用されますが、それ以外の場合はここでご自身のAPIキーを一時的に登録して保存できます（キーはブラウザに安全に保存されます）。
-                      </p>
-                      
-                      <div className="space-y-1.5">
-                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-                          Gemini API キー
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setApiKey(val);
-                              localStorage.setItem("user_gemini_api_key", val);
-                            }}
-                            placeholder="AIzaSy... で始まるキーを入力"
-                            className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                          {apiKey && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setApiKey("");
-                                localStorage.removeItem("user_gemini_api_key");
-                              }}
-                              className="px-2.5 py-1.5 text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-100 transition-all cursor-pointer"
-                            >
-                              消去
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {((import.meta as any).env?.VITE_GEMINI_API_KEY) && ((import.meta as any).env?.VITE_GEMINI_API_KEY) !== "MY_GEMINI_API_KEY" && (
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2 rounded-lg">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          環境変数からビルド済みのAPIキーが検出されました
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <div className="bg-gradient-to-br from-indigo-50/40 to-slate-50 border border-indigo-100/50 rounded-xl p-4 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
+                  <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">🚀</span>
+                  <span>ルート起点（出発地・スタート地点）</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
+                  しおり作成時、この場所をルートの最初の起点（スタート地点）として全体のタイムスケジュールを組み立てます。
+                </p>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={startLocation}
+                    onChange={(e) => setStartLocation(e.target.value)}
+                    placeholder="例: 東京駅、自宅、新宿駅"
+                    className="w-full px-3 py-2.5 pl-9 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    required
+                  />
+                  <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-indigo-500 pointer-events-none" />
+                </div>
+              </div>
             </div>
           </div>
 

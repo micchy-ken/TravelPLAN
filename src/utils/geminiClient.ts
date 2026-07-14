@@ -9,6 +9,7 @@ export interface GeneratePlanParams {
   travelType: string;
   transportMode: string;
   selectedSpots: Spot[];
+  startLocation?: string;
 }
 
 export interface SuggestSpotsParams {
@@ -17,23 +18,24 @@ export interface SuggestSpotsParams {
   transportMode: string;
   style: string;
   policy: string;
+  startLocation?: string;
 }
 
 export async function suggestSpotsClient(
   params: SuggestSpotsParams,
   apiKey: string
 ): Promise<Spot[]> {
-  const { destination, travelType, transportMode, style, policy } = params;
+  const { destination, travelType, transportMode, style, policy, startLocation = "東京駅" } = params;
   const transitText = transportMode === "car" ? "自家用車・レンタカー（道路アクセスや駐車場が便利、ドライブ向き）" : "公共交通機関（電車・バス、駅から徒歩圏内、またはバス便が良い）";
 
-  const prompt = `目的地「${destination}」において、以下の条件に最適な立ち寄りスポット・おすすめスポット（観光地、飲食店、温泉、買い出し場所など）を5箇所から8箇所、提案してください。
+  const prompt = `出発地「${startLocation}」から目的地「${destination}」へ向かう、またはその周辺を周遊する際に、以下の条件に最適な立ち寄りスポット・おすすめスポット（観光地、飲食店、温泉、買い出し場所など）を5箇所から8箇所、提案してください。
 旅行の種類: ${travelType}
 移動手段: ${transitText}
 旅行スタイル: ${style}
 しおり方針: ${policy}
 
 ### 条件：
-1. 各スポットには10から90の範囲の相対的な二次元座標 (x, y) を割り当ててください。これらは、簡易マップ上にスポットをプロットするために使用されます（例えば、駅や主要ICをx=50, y=15近辺に置き、そこからの位置関係に沿ってx, yを割り当てると良いマップになります）。
+1. 各スポットには10から90の範囲の相対的な二次元座標 (x, y) を割り当ててください。これらは、簡易マップ上にスポットをプロットするために使用されます。出発地・起点である「${startLocation}」（またはその最寄駅・ICなどエリア入口）を「x=50, y=15」あたりに想定し、そこからの実際の位置関係や南下・西進などの方向性を表現する形で各スポットの相対的な (x, y) 座標を割り当ててください。
 2. 移動手段が「自家用車」の場合は、駐車場がある、またはドライブで立ち寄りやすい場所を重視してください。
 3. 移動手段が「公共交通機関」の場合は、駅から近い、あるいはバスで行きやすいなど、アクセスしやすいスポットを提案してください。
 4. キャンプ（travelType="キャンプ"）の場合は、買い出しスポット、清潔なトイレ・水洗トイレが整った場所、および魅力的な温泉・入浴施設を必ず複数含めてください。
@@ -104,11 +106,12 @@ export async function generatePlanClient(
   params: GeneratePlanParams,
   apiKey: string
 ): Promise<TravelPlan> {
-  const { destination, days, departureTime, style, policy, travelType, transportMode, selectedSpots } = params;
+  const { destination, days, departureTime, style, policy, travelType, transportMode, selectedSpots, startLocation = "東京駅" } = params;
 
   let prompt = `以下の要件に基づいて、最高に魅力的な「旅のしおり」を1つの完璧なJSONオブジェクトとして生成してください。必ず指定されたJSONスキーマに従ってください。
 
 ### 条件：
+出発地: ${startLocation}
 目的地: ${destination}
 日程: ${days}
 出発希望時刻: ${departureTime}
@@ -118,16 +121,26 @@ export async function generatePlanClient(
 移動手段: ${transportMode === "car" ? "自家用車・レンタカー（道路状況・駐車場を考慮）" : "公共交通機関（電車・バスの時刻や徒歩ルートを考慮）"}
 `;
 
+  prompt += `\n### ルートの起点・終点条件：
+1. 旅行は必ず、指定された出発時間（${departureTime}）に「出発地：${startLocation}」から移動を始めるスケジュールにしてください。
+2. 1日目の最初のスケジュールに「${startLocation}を出発」といった項目を必ず入れてください。
+3. 2日以上の旅行で最終日がある場合は、最後の行動として「${startLocation}に帰着」または帰りの便に乗るスケジュールにしてください。
+`;
+
   if (selectedSpots && selectedSpots.length > 0) {
     prompt += `\n### 必ず行程に組み込む立ち寄りスポット（最優先）：\n`;
     selectedSpots.forEach((spot) => {
-      prompt += `- ${spot.name} (カテゴリー: ${spot.category}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
+      prompt += `- ${spot.name} (カテゴリー: ${spot.category}, 座標: x=${spot.x}, y=${spot.y}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
     });
     prompt += `\n上記スポットを、無駄な行き来が発生しない最もスムーズな順番（移動ルート）で行程に必ず含め、適切な移動時間を見積もってタイムスケジュールを組み立ててください。移動方法は「${transportMode === "car" ? "車移動" : "公共交通機関や徒歩"}」の所要時間・特徴を反映させてください。\n`;
   }
 
-  prompt += `\n- 旅行の全日程における、時間ごとの具体的なスケジュール（何時にどこに行って何をするか、移動時間など）を含めてください。
-- キャンプ（travelType="キャンプ"）が選ばれた場合は、周辺の魅力的な温泉施設や食材の買い出しスポット、快適なトイレ（ウォシュレット付きなど清潔な設備）が利用できる場所を優先的に、行程に組み込むか、おすすめメモとして必ず盛り込んでください。
+  prompt += `\n### 指示：
+- 各スケジュール項目には必ず、簡易マップ描画用の相対二次元座標 (x, y) を割り当ててください（10から90の範囲）。
+  - 起点である出発地「${startLocation}」は、x=50, y=15近辺（またはスポットに近い位置）に配置してください。
+  - 行程中の各スポットの位置関係、移動の順番に合わせて、x, y座標を整合性のある形で割り当ててください（例えば、1番目の立ち寄り地、2番目の立ち寄り地、3番目の立ち寄り地、宿泊地、と順番に移動経路が繋がるように設定してください）。
+- 旅行の全日程における、時間ごとの具体的なスケジュール（何時にどこに行って何をするか、移動時間など）を含めてください。
+- キャンプ（travelType="キャンプ"）が選ばれた場合は、周辺的魅力のある温泉施設や食材の買い出しスポット、快適なトイレ（ウォシュレット付きなど清潔な設備）が利用できる場所を優先的に、行程に組み込むか、おすすめメモとして必ず盛り込んでください。
 - 行程に含まれる各場所の「場所名、移動所要時間、目安費用（円）、カテゴリー（移動/観光/食事/宿泊/温泉/買い出し）、説明・メモ、および将来Notionデータベースへインポートするためのプロパティ構成」を含めてください。
 - Notionに流し込む際のプロパティは、日本の旅行者がNotionで管理しやすいよう「Name (タイトル/行動内容)」「Day (日付/何日目)」「Time (時間帯)」「Category (カテゴリー)」「Location (場所/住所)」「Memo (メモ)」「Cost (費用)」を想定した値をJSON内に含めてください。`;
 
@@ -222,6 +235,14 @@ export async function generatePlanClient(
                           type: "STRING",
                           description: "具体的な内容、周辺情報、おすすめポイント、またはキャンプ時の温泉/トイレ/買い出し詳細など。詳しく記述してください。"
                         },
+                        x: {
+                          type: "INTEGER",
+                          description: "マップ描画用の相対X座標（10-90）"
+                        },
+                        y: {
+                          type: "INTEGER",
+                          description: "マップ描画用の相対Y座標（10-90）"
+                        },
                         notionProperties: {
                           type: "OBJECT",
                           properties: {
@@ -236,7 +257,7 @@ export async function generatePlanClient(
                           required: ["Name", "Day", "Time", "Category", "Location", "Memo", "Cost"]
                         }
                       },
-                      required: ["time", "activity", "category", "location", "duration", "cost", "memo", "notionProperties"]
+                      required: ["time", "activity", "category", "location", "duration", "cost", "memo", "x", "y", "notionProperties"]
                     }
                   }
                 },

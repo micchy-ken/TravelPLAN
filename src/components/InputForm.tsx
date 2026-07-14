@@ -1,5 +1,5 @@
 import React from "react";
-import { MapPin, Calendar, Clock, Compass, Heart, Sparkles, Tent, Award, Map } from "lucide-react";
+import { MapPin, Calendar, Clock, Compass, Heart, Sparkles, Tent, Award, Map as MapIcon } from "lucide-react";
 
 interface InputFormProps {
   destination: string;
@@ -67,6 +67,14 @@ export const InputForm: React.FC<InputFormProps> = ({
             className="w-full px-4 py-3 pl-11 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-200"
             required
             disabled={loading}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (destination && !loading && !spotsLoading) {
+                  onSuggestSpots();
+                }
+              }
+            }}
           />
           <MapPin className="absolute left-4 top-3.5 w-5 h-5 text-slate-400 pointer-events-none" />
         </div>
@@ -281,7 +289,7 @@ export const InputForm: React.FC<InputFormProps> = ({
             </>
           ) : (
             <>
-              <Map className="w-4 h-4 mr-2 text-indigo-500" />
+              <MapIcon className="w-4 h-4 mr-2 text-indigo-500" />
               1. 立ち寄り候補地をマップに並べる
             </>
           )}

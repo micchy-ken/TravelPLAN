@@ -17,6 +17,8 @@ export interface TimelineItem {
   cost: number;
   memo: string;
   notionProperties: NotionProperties;
+  x?: number;
+  y?: number;
 }
 
 export interface TravelDay {
