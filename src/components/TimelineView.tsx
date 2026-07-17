@@ -10,9 +10,11 @@ import { LeafletMap } from "./LeafletMap";
 interface TimelineViewProps {
   plan: TravelPlan;
   onUpdatePlan: (updatedPlan: TravelPlan) => void;
-  onRecalculatePlan: (customSpots: Spot[]) => void;
+  onRecalculatePlan: (customSpots?: Spot[]) => void;
   recalculating?: boolean;
   isPlanChanged: boolean;
+  spots: Spot[];
+  selectedSpotIds: string[];
 }
 
 export const TimelineView: React.FC<TimelineViewProps> = ({ 
@@ -20,7 +22,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   onUpdatePlan, 
   onRecalculatePlan, 
   recalculating = false,
-  isPlanChanged
+  isPlanChanged,
+  spots,
+  selectedSpotIds
 }) => {
   const [activeDay, setActiveDay] = useState<number>(1);
   const [completedItems, setCompletedItems] = useState<string[]>([]);
@@ -82,6 +86,22 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   };
 
   // Automatic travel time recalculation and insertion
+  const isTransitItem = (item: TimelineItem) => {
+    if (item.category !== "移動") return false;
+    const act = item.activity || "";
+    const memo = item.memo || "";
+    const loc = item.location || "";
+    return (
+      act.includes("への移動") ||
+      act.includes("➔") ||
+      act.includes("から") ||
+      act.includes("移動時間") ||
+      memo.includes("自動計算") ||
+      memo.includes("移動時間") ||
+      loc.includes("➔")
+    );
+  };
+
   const recalculateTravelTimes = (currentPlan: TravelPlan): TravelPlan => {
     const updatedPlan = JSON.parse(JSON.stringify(currentPlan)) as TravelPlan;
 
@@ -140,12 +160,21 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     };
 
     updatedPlan.days.forEach((day) => {
-      // 1. Filter out all existing "移動" items
-      const nonTravelItems = day.items.filter(item => item.category !== "移動");
-      if (nonTravelItems.length === 0) {
+      // 1. Filter out all existing intermediate transit items, while preserving the fixed Departure/Arrival points
+      const nonTravelItemsUnsorted = day.items.filter(item => !isTransitItem(item));
+      if (nonTravelItemsUnsorted.length === 0) {
         day.items = [];
         return;
       }
+
+      const isDeparture = (item: TimelineItem) => item.category === "移動" && (item.activity?.includes("出発") || item.memo?.includes("出発"));
+      const isArrival = (item: TimelineItem) => item.category === "移動" && (item.activity?.includes("帰着") || item.activity?.includes("到着") || item.memo?.includes("帰着") || item.memo?.includes("到着"));
+
+      const departures = nonTravelItemsUnsorted.filter(isDeparture);
+      const arrivals = nonTravelItemsUnsorted.filter(isArrival);
+      const middle = nonTravelItemsUnsorted.filter(item => !isDeparture(item) && !isArrival(item));
+      
+      const nonTravelItems = [...departures, ...middle, ...arrivals];
 
       // 2. Re-sequence times and insert "移動" items in between
       const rebuiltItems: TimelineItem[] = [];
@@ -346,16 +375,25 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     });
   };
 
-  // Trigger AI schedule recalculation based on modified spots list
+  // Trigger AI schedule recalculation based on modified timeline spots
   const handleTriggerRecalculate = () => {
+    const isDeparture = (item: TimelineItem) => item.category === "移動" && (item.activity?.includes("出発") || item.memo?.includes("出発"));
+    const isArrival = (item: TimelineItem) => item.category === "移動" && (item.activity?.includes("帰着") || item.activity?.includes("到着") || item.memo?.includes("帰着") || item.memo?.includes("到着"));
+
     const customSpots: Spot[] = plan.days.flatMap((day) =>
       day.items
-        .filter(item => item.category !== "移動")
+        .filter(item => {
+          if (isTransitItem(item) || isDeparture(item) || isArrival(item)) return false;
+          // Filter out spots that were turned off in the map
+          const originalSpot = spots.find(s => s.name === item.activity);
+          if (originalSpot && !selectedSpotIds.includes(originalSpot.id)) return false;
+          return true;
+        })
         .map((item, idx) => ({
           id: `custom-spot-${day.dayNumber}-${idx}`,
-          name: item.activity,
-          category: item.category,
-          description: item.memo || item.location,
+          name: item.activity || "",
+          category: item.category || "観光",
+          description: item.memo || item.location || "",
           recommendedDuration: item.duration || "60分",
           estimatedCost: item.cost || 0,
           x: item.x || 50,
@@ -365,7 +403,11 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           reason: `${day.dayNumber}日目のカスタマイズ立ち寄り項目です。`
         }))
     );
-    onRecalculatePlan(customSpots);
+    if (isPlanChanged) {
+      onRecalculatePlan(customSpots);
+    } else {
+      onRecalculatePlan();
+    }
   };
 
   // Calculate stats
@@ -572,7 +614,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               <div 
                 className={`transition-all duration-200 ${
                   isTravelItem
-                    ? "bg-slate-50/80 rounded-xl border border-slate-200/60 p-4 opacity-75 shadow-2xs select-none hover:opacity-90"
+                    ? "bg-slate-50/50 text-slate-400 border border-slate-200 p-4 opacity-65 shadow-none select-none pointer-events-none cursor-not-allowed"
                     : isDraggingCurrent
                     ? "bg-white border border-dashed border-indigo-300 opacity-40 scale-[0.98] shadow-inner"
                     : isDragTarget
@@ -666,7 +708,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
                     {/* 自動計算バッジ */}
                     {isTravelItem && (
-                      <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-100 font-extrabold px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200/60 font-extrabold px-1.5 py-0.5 rounded">
                         自動計算
                       </span>
                     )}

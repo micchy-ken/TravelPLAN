@@ -210,7 +210,7 @@ export default function App() {
       const isGitHubPages = window.location.hostname.endsWith("github.io");
       let success = false;
       let generatedPlan: TravelPlan | null = null;
-      const selectedSpots = customSpotsOverride || spots.filter((spot) => selectedSpotIds.includes(spot.id));
+      const selectedSpots = customSpotsOverride || selectedSpotIds.map(id => spots.find(s => s.id === id)).filter((s): s is Spot => !!s);
 
       // Determine API key to pass
       let activeKeyForPlan = apiKey.trim();
@@ -757,6 +757,7 @@ export default function App() {
                       spots={spots}
                       selectedSpotIds={selectedSpotIds}
                       onToggleSpot={handleToggleSpot}
+                      onReorderSelectedSpots={setSelectedSpotIds}
                       transportMode={transportMode}
                       destination={destination}
                     />
@@ -976,10 +977,15 @@ export default function App() {
                       >
                         <TimelineView 
                           plan={plan} 
-                          onUpdatePlan={(updatedPlan) => setPlan(updatedPlan)}
-                          onRecalculatePlan={handleRecalculatePlan}
+                          onUpdatePlan={(updatedPlan) => {
+                            setPlan(updatedPlan);
+                            setInitialPlanSignature(getPlanSequenceSignature(updatedPlan));
+                          }}
+                          onRecalculatePlan={(customSpots) => handleGeneratePlan(customSpots)}
                           recalculating={recalculating}
                           isPlanChanged={isPlanChanged}
+                          spots={spots}
+                          selectedSpotIds={selectedSpotIds}
                         />
                       </motion.div>
                     ) : (

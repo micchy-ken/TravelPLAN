@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Spot } from "../types";
-import { MapPin, Info, Car, Train, Clock, CircleDollarSign, Check, Plus, Minus, Layers } from "lucide-react";
+import { MapPin, Info, Car, Train, Clock, CircleDollarSign, Check, Plus, Minus, Layers, GripVertical, ArrowUp, ArrowDown } from "lucide-react";
 import { LeafletMap } from "./LeafletMap";
 
 interface InteractiveMapProps {
   spots: Spot[];
   selectedSpotIds: string[];
   onToggleSpot: (id: string) => void;
+  onReorderSelectedSpots?: (newIds: string[]) => void;
   transportMode: string;
   destination: string;
 }
@@ -16,11 +17,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   spots,
   selectedSpotIds,
   onToggleSpot,
+  onReorderSelectedSpots,
   transportMode,
   destination,
 }) => {
   const [hoveredSpotId, setHoveredSpotId] = useState<string | null>(null);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [draggingSpotIndex, setDraggingSpotIndex] = useState<number | null>(null);
+  const [dragOverSpotIndex, setDragOverSpotIndex] = useState<number | null>(null);
 
   const categories = ["all", "観光", "食事", "温泉", "買い出し", "宿泊"];
 
@@ -28,7 +32,53 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     (spot) => selectedCategoryFilter === "all" || spot.category === selectedCategoryFilter
   );
 
-  const selectedSpotsInOrder = spots.filter((spot) => selectedSpotIds.includes(spot.id));
+  const selectedSpotsInOrder = selectedSpotIds
+    .map((id) => spots.find((s) => s.id === id))
+    .filter((s): s is Spot => !!s);
+
+  const moveSelectedSpot = (index: number, direction: 'up' | 'down') => {
+    if (!onReorderSelectedSpots) return;
+    const nextIds = [...selectedSpotIds];
+    if (direction === 'up' && index > 0) {
+      const temp = nextIds[index];
+      nextIds[index] = nextIds[index - 1];
+      nextIds[index - 1] = temp;
+    } else if (direction === 'down' && index < nextIds.length - 1) {
+      const temp = nextIds[index];
+      nextIds[index] = nextIds[index + 1];
+      nextIds[index + 1] = temp;
+    }
+    onReorderSelectedSpots(nextIds);
+  };
+
+  const handleSpotDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData("text/plain", index.toString());
+    setDraggingSpotIndex(index);
+  };
+
+  const handleSpotDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleSpotDragEnter = (e: React.DragEvent, targetIndex: number) => {
+    setDragOverSpotIndex(targetIndex);
+  };
+
+  const handleSpotDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggingSpotIndex === null || draggingSpotIndex === targetIndex) {
+      setDraggingSpotIndex(null);
+      setDragOverSpotIndex(null);
+      return;
+    }
+    if (!onReorderSelectedSpots) return;
+    const nextIds = [...selectedSpotIds];
+    const [draggedId] = nextIds.splice(draggingSpotIndex, 1);
+    nextIds.splice(targetIndex, 0, draggedId);
+    onReorderSelectedSpots(nextIds);
+    setDraggingSpotIndex(null);
+    setDragOverSpotIndex(null);
+  };
 
   return (
     <div className="bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden p-6 space-y-6" id="interactive-map-workspace">
@@ -124,6 +174,98 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 </button>
               ))}
             </div>
+
+            {/* 選択中のスポットの訪問順序 */}
+            {selectedSpotsInOrder.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                    <span className="p-1 bg-indigo-50 text-indigo-600 rounded-md">📌</span>
+                    選択中スポットの訪問順序
+                  </h4>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    ※上から順に巡回します (ドラッグまたは矢印で順序変更)
+                  </span>
+                </div>
+                
+                <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+                  {selectedSpotsInOrder.map((spot, index) => (
+                    <div
+                      key={spot.id}
+                      draggable
+                      onDragStart={(e) => handleSpotDragStart(e, index)}
+                      onDragOver={(e) => handleSpotDragOver(e, index)}
+                      onDragEnter={(e) => handleSpotDragEnter(e, index)}
+                      onDrop={(e) => handleSpotDrop(e, index)}
+                      onDragEnd={() => {
+                        setDraggingSpotIndex(null);
+                        setDragOverSpotIndex(null);
+                      }}
+                      className={`flex items-center justify-between p-2.5 bg-white border rounded-xl shadow-2xs transition-all ${
+                        draggingSpotIndex === index
+                          ? "opacity-40 border-dashed border-indigo-300"
+                          : dragOverSpotIndex === index
+                          ? "border-indigo-500 bg-indigo-50/20 scale-[1.01]"
+                          : "border-slate-150 hover:border-indigo-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="p-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500 rounded transition-colors">
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="w-4.5 h-4.5 rounded-full bg-indigo-50 text-indigo-700 font-black text-[10px] flex items-center justify-center shrink-0">
+                          {index + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-700 truncate">
+                          {spot.name}
+                        </span>
+                        <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md shrink-0">
+                          {spot.category}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveSelectedSpot(index, 'up');
+                          }}
+                          className="p-1 hover:bg-slate-100 rounded text-slate-500 disabled:opacity-30 cursor-pointer transition-colors"
+                          title="先にする"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === selectedSpotsInOrder.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveSelectedSpot(index, 'down');
+                          }}
+                          className="p-1 hover:bg-slate-100 rounded text-slate-500 disabled:opacity-30 cursor-pointer transition-colors"
+                          title="後にする"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleSpot(spot.id);
+                          }}
+                          className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded cursor-pointer transition-colors"
+                          title="選択解除"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* スポットカードスクロール領域 */}
             <div className="space-y-2.5 overflow-y-auto pr-1 max-h-[420px] scrollbar-thin">

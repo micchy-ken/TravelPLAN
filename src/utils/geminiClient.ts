@@ -21,6 +21,27 @@ export interface SuggestSpotsParams {
   startLocation?: string;
 }
 
+async function clientRetry(fn: () => Promise<Response>, retries = 3, delay = 1000): Promise<Response> {
+  try {
+    const res = await fn();
+    if (res.status === 429 || res.status >= 500) {
+      if (retries > 0) {
+        console.warn(`Browser Gemini API call failed with status ${res.status}. Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return clientRetry(fn, retries - 1, delay * 2);
+      }
+    }
+    return res;
+  } catch (error) {
+    if (retries > 0) {
+      console.warn(`Browser Gemini API call failed. Retrying in ${delay}ms...`, error);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return clientRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
 export async function suggestSpotsClient(
   params: SuggestSpotsParams,
   apiKey: string
@@ -131,12 +152,12 @@ export async function generatePlanClient(
 `;
 
   if (selectedSpots && selectedSpots.length > 0) {
-    prompt += `\n### 必ず行程に組み込む立ち寄りスポット（最優先）：\n`;
-    selectedSpots.forEach((spot) => {
-      prompt += `- ${spot.name} (カテゴリー: ${spot.category}, 座標: x=${spot.x}, y=${spot.y}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
+    prompt += `\n### 必ず行程に組み込む立ち寄りスポット（最優先・訪問順序）：\n`;
+    selectedSpots.forEach((spot, idx) => {
+      prompt += `${idx + 1}. ${spot.name} (カテゴリー: ${spot.category}, 座標: x=${spot.x}, y=${spot.y}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
     });
-    prompt += `\n上記スポットを、無駄な行き来が発生しない最もスムーズな順番（移動ルート）で行程に必ず含め、適切な移動時間を見積もってタイムスケジュールを組み立ててください。移動方法は「${transportMode === "car" ? "車移動" : "公共交通機関や徒歩"}」の所要時間・特徴を反映させてください。\n`;
-    prompt += `\n【重要・厳守ルール】観光・見学・温泉などの主要な目的地として組み込むのは、上記の「必ず行程に組み込む立ち寄りスポット」として指定されたスポットのみにしてください。ユーザーがチェック（選択）していない、無関係な新しい観光スポットや候補地リストにない場所は、絶対に行程に含めないでください。ただし、出発地、到着地、食事（ランチ・ディナー等）、宿泊、および移動手段の乗り継ぎ駅などは自動で妥当なものを追加しても構いません。\n`;
+    prompt += `\n上記スポットを、ユーザーが指定した通りの順番（1番から順に訪問するルート）で行程に必ず含め、適切な移動時間を見積もってタイムスケジュールを組み立ててください。移動方法は「${transportMode === "car" ? "車移動" : "公共交通機関や徒歩"}」の所要時間・特徴を反映させてください。\n`;
+    prompt += `\n【重要・厳守ルール】観光・見学・温泉などの目的地として組み込むのは、上記の「必ず行程に組み込む立ち寄りスポット」として指定されたスポットのみにしてください。ユーザーがチェック（選択）していない、無関係な新しい観光スポットや候補地リストにない場所は、絶対に行程に含めないでください。ただし、出発地、到着地、食事（ランチ・ディナー等）、宿泊、および移動手段の乗り継ぎ駅などは自動で妥当なものを追加しても構いません。\n`;
   }
 
   prompt += `\n### 指示：
