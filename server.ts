@@ -7,16 +7,40 @@ import { createServer as createViteServer } from "vite";
 // Load environment variables
 dotenv.config();
 
-// Shared Gemini client utility
-// Note: User-Agent is set to 'aistudio-build' in httpOptions for telemetry
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+// Helper to get Gemini client dynamically (from client header or server env)
+function getAiClient(clientApiKey?: string) {
+  const key = clientApiKey?.trim() || process.env.GEMINI_API_KEY?.trim();
+  if (!key) {
+    throw new Error("Gemini APIキーが設定されていません。アプリの「APIキー設定」から入力するか、サーバーの環境変数 GEMINI_API_KEY を設定してください。");
   }
-});
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+}
+
+// Robust retry mechanism with exponential backoff for handling peak congestion (especially evening/night rate limits)
+async function retryWithBackoff<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const status = error?.status || error?.statusCode;
+    const isRateLimit = status === 429 || (error?.message && error.message.includes("429"));
+    const isServerError = status >= 500 || (error?.message && (error.message.includes("500") || error.message.includes("503") || error.message.includes("overloaded")));
+    const isQuotaError = error?.message && (error.message.includes("quota") || error.message.includes("Quota"));
+
+    if (retries > 0 && (isRateLimit || isServerError || isQuotaError || !status)) {
+      console.warn(`Gemini API call failed (retries left: ${retries}). Error: ${error?.message || error}. Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return retryWithBackoff(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -28,12 +52,14 @@ async function startServer() {
   // API Route: Suggest recommended spots based on destination, transport, style, etc.
   app.post("/api/spots", async (req, res) => {
     const { destination, travelType, transportMode, style, policy, startLocation = "東京駅" } = req.body;
+    const clientApiKey = req.headers["x-gemini-api-key"] as string | undefined;
 
     if (!destination) {
       return res.status(400).json({ error: "目的地を入力してください。" });
     }
 
     try {
+      const ai = getAiClient(clientApiKey);
       const transitText = transportMode === "car" ? "自家用車・レンタカー（道路アクセスや駐車場が便利、ドライブ向き）" : "公共交通機関（電車・バス、駅から徒歩圏内、またはバス便が良い）";
       const prompt = `出発地「${startLocation}」から目的地「${destination}」へ向かう、またはその周辺を周遊する際に、以下の条件に最適な立ち寄りスポット・おすすめスポット（観光地、飲食店、温泉、買い出し場所など）を5箇所から8箇所、提案してください。
 旅行の種類: ${travelType}
@@ -49,40 +75,42 @@ async function startServer() {
 5. 各スポットについて、なぜこの移動手段（自家用車または公共交通機関）で訪れるのにおすすめな具体的な理由やアクセスのヒントを詳しく記述してください。
 6. 各スポットの実世界の正確な緯度(latitude)と経度(longitude)を推測し、latとlngプロパティに小数値で設定してください。`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: "あなたは地元の観光情報に非常に精通した優秀なトラベルコンシェルジュです。ユーザーの移動手段（車 vs 公共交通機関）や目的に対して、本当に快適で満足度の高い立ち寄りスポットを、正確な相対座標付きで提案してください。出力は指定されたJSONスキーマに完全に準拠し、余計な説明文は一切省いてください。",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              spots: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING, description: "ユニークな識別子（例: spot-1, spot-2）" },
-                    name: { type: Type.STRING, description: "スポットの名称" },
-                    category: { type: Type.STRING, description: "カテゴリー（観光/食事/温泉/買い出し/宿泊）" },
-                    description: { type: Type.STRING, description: "スポットの概要や魅力" },
-                    recommendedDuration: { type: Type.STRING, description: "滞在時間の目安（例: 60分, 90分）" },
-                    estimatedCost: { type: Type.INTEGER, description: "一人あたりの目安費用（日本円。無料の場合は0）" },
-                    reason: { type: Type.STRING, description: "なぜ移動手段や条件に最適なのかという理由" },
-                    x: { type: Type.INTEGER, description: "相対二次元座標のX値（10-90）" },
-                    y: { type: Type.INTEGER, description: "相対二次元座標のY値（10-90）" },
-                    lat: { type: Type.NUMBER, description: "実世界の緯度（例: 35.6812）" },
-                    lng: { type: Type.NUMBER, description: "実世界の経度（例: 139.7671）" }
-                  },
-                  required: ["id", "name", "category", "description", "recommendedDuration", "estimatedCost", "reason", "x", "y", "lat", "lng"]
+      const response = await retryWithBackoff(() =>
+        ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            systemInstruction: "あなたは地元の観光情報に非常に精通した優秀なトラベルコンシェルジュです。ユーザーの移動手段（車 vs 公共交通機関）や目的に対して、本当に快適で満足度の高い立ち寄りスポットを、正確な相対座標付きで提案してください。出力は指定されたJSONスキーマに完全に準拠し、余計な説明文は一切省いてください。",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                spots: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING, description: "ユニークな識別子（例: spot-1, spot-2）" },
+                      name: { type: Type.STRING, description: "スポットの名称" },
+                      category: { type: Type.STRING, description: "カテゴリー（観光/食事/温泉/買い出し/宿泊）" },
+                      description: { type: Type.STRING, description: "スポットの概要や魅力" },
+                      recommendedDuration: { type: Type.STRING, description: "滞在時間の目安（例: 60分, 90分）" },
+                      estimatedCost: { type: Type.INTEGER, description: "一人あたりの目安費用（日本円。無料の場合は0）" },
+                      reason: { type: Type.STRING, description: "なぜ移動手段や条件に最適なのかという理由" },
+                      x: { type: Type.INTEGER, description: "相対二次元座標 of X値（10-90）" },
+                      y: { type: Type.INTEGER, description: "相対二次元座標 of Y値（10-90）" },
+                      lat: { type: Type.NUMBER, description: "実世界の緯度（例: 35.6812）" },
+                      lng: { type: Type.NUMBER, description: "実世界の経度（例: 139.7671）" }
+                    },
+                    required: ["id", "name", "category", "description", "recommendedDuration", "estimatedCost", "reason", "x", "y", "lat", "lng"]
+                  }
                 }
-              }
-            },
-            required: ["spots"]
+              },
+              required: ["spots"]
+            }
           }
-        }
-      });
+        })
+      );
 
       const spotsText = response.text;
       if (!spotsText) {
@@ -102,12 +130,14 @@ async function startServer() {
 
   app.post("/api/plan", async (req, res) => {
     const { destination, days, departureTime, style, policy, travelType, transportMode, selectedSpots, startLocation = "東京駅" } = req.body;
+    const clientApiKey = req.headers["x-gemini-api-key"] as string | undefined;
 
     if (!destination) {
       return res.status(400).json({ error: "目的地を入力してください。" });
     }
 
     try {
+      const ai = getAiClient(clientApiKey);
       // Build instructions based on requirements
       let prompt = `以下の条件に沿った、非常に具体的で魅力的な旅行タイムスケジュールを作成してください。
 出発地: ${startLocation}
@@ -132,6 +162,7 @@ async function startServer() {
           prompt += `- ${spot.name} (カテゴリー: ${spot.category}, 座標: x=${spot.x}, y=${spot.y}, 滞在目安: ${spot.recommendedDuration}, 費用目安: ${spot.estimatedCost}円): ${spot.description}\n`;
         });
         prompt += `\n上記スポットを、無駄な行き来が発生しない最もスムーズな順番（移動ルート）で行程に必ず含め、適切な移動時間を見積もってタイムスケジュールを組み立ててください。移動方法は「${transportMode === "car" ? "車移動" : "公共交通機関や徒歩"}」の所要時間・特徴を反映させてください。\n`;
+        prompt += `\n【重要・厳守ルール】観光・見学・温泉などの主要な目的地として組み込むのは、上記の「必ず行程に組み込む立ち寄りスポット」として指定されたスポットのみにしてください。ユーザーがチェック（選択）していない、無関係な新しい観光スポットや候補地リストにない場所は、絶対に行程に含めないでください。ただし、出発地、到着地、食事（ランチ・ディナー等）、宿泊、および移動手段の乗り継ぎ駅などは自動で妥当なものを追加しても構いません。\n`;
       }
 
       prompt += `\n### 指示：
@@ -146,23 +177,24 @@ async function startServer() {
 `;
 
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: "あなたはプロの旅行アドバイザーであり、Notionをフル活用するデジタルしおりクリエイターです。ユーザーがワクワクし、かつ実用的な、手抜きのないタイムスケジュールを作成してください。出力は必ず指定されたJSON形式にのみ従い、余計な説明テキストやMarkdownの装飾を一切含めないでください。",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: {
-                type: Type.STRING,
-                description: "しおりの魅力的なタイトル（例: 「伊豆の自然を満喫！癒やしの温泉1泊2日プラン」）"
-              },
-              destination: {
-                type: Type.STRING,
-                description: "目的地"
-              },
+      const response = await retryWithBackoff(() =>
+        ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            systemInstruction: "あなたはプロの旅行アドバイザーであり、Notionをフル活用するデジタルしおりクリエイターです。ユーザーがワクワクし、かつ実用的な、手抜きのないタイムスケジュールを作成してください。出力は必ず指定されたJSON形式にのみ従い、余計な説明テキストやMarkdownの装飾を一切含めないでください。",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: {
+                  type: Type.STRING,
+                  description: "しおりの魅力的なタイトル（例: 「伊豆の自然を満喫！癒やしの温泉1泊2日プラン」）"
+                },
+                destination: {
+                  type: Type.STRING,
+                  description: "目的地"
+                },
               daysCount: {
                 type: Type.STRING,
                 description: "何日間のプランか（例: 「2日間」）"
@@ -258,7 +290,7 @@ async function startServer() {
             required: ["title", "destination", "daysCount", "overview", "days"]
           }
         }
-      });
+      }));
 
       const planText = response.text;
       if (!planText) {

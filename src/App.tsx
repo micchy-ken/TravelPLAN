@@ -97,14 +97,26 @@ export default function App() {
       let success = false;
       let generatedSpots: Spot[] = [];
 
+      // Determine API key to pass
+      let activeKey = apiKey.trim();
+      const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      if (!activeKey && viteKey && viteKey !== "MY_GEMINI_API_KEY" && viteKey.trim() !== "") {
+        activeKey = viteKey.trim();
+      }
+
       // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
       if (!isGitHubPages) {
         try {
+          const headers: HeadersInit = {
+            "Content-Type": "application/json",
+          };
+          if (activeKey) {
+            headers["x-gemini-api-key"] = activeKey;
+          }
+
           const response = await fetch("/api/spots", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers,
             body: JSON.stringify({
               destination,
               travelType,
@@ -127,8 +139,12 @@ export default function App() {
           } else {
             throw new Error(data.error || "おすすめスポットの検索中に予期しないエラーが発生しました。");
           }
-        } catch (serverErr) {
+        } catch (serverErr: any) {
           console.warn("Backend spots API request failed. Falling back to client-side direct generation...", serverErr);
+          // If the server explicitly returns a Gemini/Config error message, propagate it rather than falling back
+          if (serverErr?.message && (serverErr.message.includes("Gemini API") || serverErr.message.includes("APIキー"))) {
+            throw serverErr;
+          }
         }
       }
 
@@ -196,14 +212,26 @@ export default function App() {
       let generatedPlan: TravelPlan | null = null;
       const selectedSpots = customSpotsOverride || spots.filter((spot) => selectedSpotIds.includes(spot.id));
 
+      // Determine API key to pass
+      let activeKeyForPlan = apiKey.trim();
+      const viteKeyForPlan = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      if (!activeKeyForPlan && viteKeyForPlan && viteKeyForPlan !== "MY_GEMINI_API_KEY" && viteKeyForPlan.trim() !== "") {
+        activeKeyForPlan = viteKeyForPlan.trim();
+      }
+
       // 1. Try backend server first, unless explicitly hosted on static GitHub Pages
       if (!isGitHubPages) {
         try {
+          const headers: HeadersInit = {
+            "Content-Type": "application/json",
+          };
+          if (activeKeyForPlan) {
+            headers["x-gemini-api-key"] = activeKeyForPlan;
+          }
+
           const response = await fetch("/api/plan", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers,
             body: JSON.stringify({
               destination,
               days,
@@ -229,8 +257,12 @@ export default function App() {
           } else {
             throw new Error(data.error || "しおりの生成中に予期しないエラーが発生しました。");
           }
-        } catch (serverErr) {
+        } catch (serverErr: any) {
           console.warn("Backend API request failed. Falling back to browser direct generation...", serverErr);
+          // If the server explicitly returns a Gemini/Config error message, propagate it rather than falling back
+          if (serverErr?.message && (serverErr.message.includes("Gemini API") || serverErr.message.includes("APIキー"))) {
+            throw serverErr;
+          }
         }
       }
 
