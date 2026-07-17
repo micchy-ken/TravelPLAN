@@ -7,7 +7,7 @@ import {
 import { InputForm } from "./components/InputForm";
 import { TimelineView } from "./components/TimelineView";
 import { NotionIntegration } from "./components/NotionIntegration";
-import { TravelPlan, Spot } from "./types";
+import { TravelPlan, Spot, TimelineItem } from "./types";
 import { generatePlanClient, suggestSpotsClient } from "./utils/geminiClient";
 import { InteractiveMap } from "./components/InteractiveMap";
 
@@ -308,7 +308,102 @@ export default function App() {
   const handleRecalculatePlan = async (customSpots: Spot[]) => {
     setRecalculating(true);
     try {
-      await handleGeneratePlan(customSpots);
+      if (!plan) return;
+
+      // Deep copy plan
+      const newPlan = JSON.parse(JSON.stringify(plan)) as TravelPlan;
+
+      const parseTimeToMinutes = (timeStr: string): number => {
+        const parts = timeStr.split(":");
+        if (parts.length !== 2) return 8 * 60; // 08:00
+        return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+      };
+
+      const formatMinutesToTime = (totalMinutes: number): string => {
+        const h = Math.floor(totalMinutes / 60) % 24;
+        const m = totalMinutes % 60;
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      };
+
+      const parseDurationToMinutes = (durationStr: string, category: string): number => {
+        if (!durationStr) {
+          return category === "移動" ? 20 : 60;
+        }
+        let minutes = 0;
+        const hourMatch = durationStr.match(/(\d+)\s*時間/);
+        const minMatch = durationStr.match(/(\d+)\s*分/);
+        if (hourMatch) minutes += parseInt(hourMatch[1], 10) * 60;
+        if (minMatch) minutes += parseInt(minMatch[1], 10);
+        if (minutes === 0) {
+          const engHourMatch = durationStr.match(/(\d+(\.\d+)?)\s*h/i);
+          const engMinMatch = durationStr.match(/(\d+)\s*m/i);
+          const numOnlyMatch = durationStr.match(/^(\d+)$/);
+          if (engHourMatch) minutes += Math.round(parseFloat(engHourMatch[1]) * 60);
+          if (engMinMatch) minutes += parseInt(engMinMatch[1], 10);
+          if (numOnlyMatch) minutes += parseInt(numOnlyMatch[1], 10);
+        }
+        return minutes > 0 ? minutes : (category === "移動" ? 20 : 60);
+      };
+
+      const mode = transportMode || "car";
+
+      const calculateTravelTime = (
+        fromItem: TimelineItem,
+        toItem: TimelineItem
+      ): number => {
+        if (fromItem.category === "移動" || toItem.category === "移動") {
+          return 0;
+        }
+
+        let distanceKm = 0;
+
+        if (fromItem.lat && fromItem.lng && toItem.lat && toItem.lng) {
+          const dx = toItem.lat - fromItem.lat;
+          const dy = toItem.lng - fromItem.lng;
+          distanceKm = Math.sqrt((dx * 111) ** 2 + (dy * 90) ** 2);
+        } else if (fromItem.x !== undefined && fromItem.y !== undefined && toItem.x !== undefined && toItem.y !== undefined) {
+          const dx = toItem.x - fromItem.x;
+          const dy = toItem.y - fromItem.y;
+          distanceKm = Math.sqrt(dx * dx + dy * dy) * 0.15;
+        } else {
+          return 15;
+        }
+
+        const speed = mode === "car" ? 40 : 25;
+        const travelTimeMinutes = (distanceKm / speed) * 60;
+
+        const rounded = Math.round(travelTimeMinutes / 5) * 5;
+        return Math.min(120, Math.max(10, rounded));
+      };
+
+      newPlan.days.forEach((day) => {
+        if (day.items.length === 0) return;
+
+        let currentMinutes = parseTimeToMinutes(departureTime);
+
+        day.items.forEach((item, index) => {
+          if (index > 0) {
+            const travelTime = calculateTravelTime(day.items[index - 1], item);
+            currentMinutes += travelTime;
+          }
+
+          const startStr = formatMinutesToTime(currentMinutes);
+          const durationMins = parseDurationToMinutes(item.duration, item.category);
+          currentMinutes += durationMins;
+          const endStr = formatMinutesToTime(currentMinutes);
+
+          item.time = `${startStr} - ${endStr}`;
+
+          if (item.notionProperties) {
+            item.notionProperties.Time = item.time;
+          }
+        });
+      });
+
+      setPlan(newPlan);
+      setInitialPlanSignature(getPlanSequenceSignature(newPlan));
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (err: any) {
       console.error(err);
       setError(err.message || "再計算に失敗しました。");
@@ -684,9 +779,44 @@ export default function App() {
                   </div>
                   <h3 className="text-base font-bold text-slate-900">しおり作成をはじめましょう！</h3>
                   <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                    左側のフォームにあなたの理想の旅行を入力し、まずは<br />
-                    <strong className="text-indigo-600 font-extrabold">「1. 立ち寄り候補地をマップに並べる」</strong> ボタンを押してください。AIがおすすめの立ち寄り地をご提案します！
+                    左側のフォームにあなたの理想の旅行を入力し、まずは下記のボタンから立ち寄り候補地をマッピングしましょう！
                   </p>
+                </div>
+
+                {/* 1. 立ち寄り候補地をマップに並べる ボタン */}
+                <div className="max-w-md mx-auto pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSuggestSpots()}
+                    disabled={loading || spotsLoading || !destination}
+                    className={`w-full py-4 px-6 rounded-2xl font-black text-white shadow-lg flex items-center justify-center gap-2.5 transition-all duration-300 cursor-pointer text-sm ${
+                      spotsLoading
+                        ? "bg-indigo-100 border border-indigo-200 text-indigo-500 cursor-wait"
+                        : loading || !destination
+                        ? "bg-slate-300 cursor-not-allowed shadow-none"
+                        : "bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] hover:shadow-indigo-100"
+                    }`}
+                  >
+                    {spotsLoading ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2.5 h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>立ち寄りスポットを検索中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Map className="w-5 h-5 text-indigo-200" />
+                        <span>1. 立ち寄り候補地をマップに並べる</span>
+                      </>
+                    )}
+                  </button>
+                  {!destination && (
+                    <p className="text-[11px] text-rose-500 font-bold mt-2.5">
+                      ※ 立ち寄り候補地を並べるには、左側のこだわり設定で「目的地」を入力してください。
+                    </p>
+                  )}
                 </div>
 
                 <div className="max-w-xl mx-auto border-t border-slate-100 pt-6">
