@@ -36,8 +36,7 @@ export default function App() {
   const [plan, setPlan] = useState<TravelPlan | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "notion">("timeline");
 
-  // Location and Travel History states
-  const [locLoading, setLocLoading] = useState(false);
+  // Travel History states
   const [history, setHistory] = useState<any[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("travel_history") || "[]");
@@ -334,29 +333,6 @@ export default function App() {
     localStorage.setItem("start_location", item.startLocation || "東京駅");
   };
 
-  const handleGetCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setError("お使いのブラウザは現在地情報の取得に対応していません。");
-      return;
-    }
-    setLocLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        const locationStr = `現在地 (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
-        setStartLocation(locationStr);
-        localStorage.setItem("start_location", locationStr);
-        setLocLoading(false);
-      },
-      (err) => {
-        console.error("Geolocation error:", err);
-        setError("現在地の取得に失敗しました。GPSなどの位置情報の権限がブラウザで許可されているかご確認ください。");
-        setLocLoading(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
-
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-20 selection:bg-indigo-100 selection:text-indigo-900">
@@ -445,32 +421,10 @@ export default function App() {
                       localStorage.setItem("start_location", e.target.value);
                     }}
                     placeholder="例: 東京駅、自宅、新宿駅"
-                    className="w-full px-3 py-2.5 pl-9 pr-28 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 pl-9 pr-3 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                   <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-indigo-500 pointer-events-none" />
-                  
-                  <button
-                    type="button"
-                    disabled={locLoading}
-                    onClick={handleGetCurrentLocation}
-                    className="absolute right-1.5 top-1.5 bottom-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-100 text-indigo-700 disabled:text-slate-400 font-bold text-[10px] rounded border border-indigo-200/50 flex items-center gap-1 cursor-pointer transition-colors"
-                  >
-                    {locLoading ? (
-                      <>
-                        <svg className="animate-spin h-3 w-3 text-indigo-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        取得中...
-                      </>
-                    ) : (
-                      <>
-                        <Compass className="w-3.5 h-3.5" />
-                        現在地を取得
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
             </div>

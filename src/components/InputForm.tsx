@@ -108,19 +108,58 @@ export const InputForm: React.FC<InputFormProps> = ({
 
         {/* 出発時刻 */}
         <div className="space-y-2">
-          <label className="flex items-center text-sm font-semibold text-slate-700" htmlFor="departure-time">
+          <label className="flex items-center text-sm font-semibold text-slate-700">
             <Clock className="w-4 h-4 mr-2 text-indigo-600" />
             出発希望時刻
           </label>
-          <input
-            id="departure-time"
-            type="time"
-            value={departureTime}
-            onChange={(e) => setDepartureTime(e.target.value)}
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-200 text-sm"
-            disabled={loading || spotsLoading}
-            required
-          />
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <select
+                id="departure-hour"
+                value={departureTime.split(":")[0] || "08"}
+                onChange={(e) => {
+                  const min = departureTime.split(":")[1] || "00";
+                  setDepartureTime(`${e.target.value}:${min}`);
+                }}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-200 appearance-none cursor-pointer text-sm"
+                disabled={loading || spotsLoading}
+              >
+                {Array.from({ length: 24 }).map((_, i) => {
+                  const h = String(i).padStart(2, "0");
+                  return (
+                    <option key={h} value={h}>
+                      {h}時
+                    </option>
+                  );
+                })}
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-slate-400 text-xs">
+                ▼
+              </div>
+            </div>
+            <span className="text-slate-400 font-bold">:</span>
+            <div className="relative flex-1">
+              <select
+                id="departure-minute"
+                value={departureTime.split(":")[1] || "00"}
+                onChange={(e) => {
+                  const hour = departureTime.split(":")[0] || "08";
+                  setDepartureTime(`${hour}:${e.target.value}`);
+                }}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all duration-200 appearance-none cursor-pointer text-sm"
+                disabled={loading || spotsLoading}
+              >
+                {["00", "15", "30", "45"].map((m) => (
+                  <option key={m} value={m}>
+                    {m}分
+                  </option>
+                ))}
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-slate-400 text-xs">
+                ▼
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
